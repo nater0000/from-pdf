@@ -19,12 +19,21 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - run: |
+      - name: Install Tools and Llama.cpp
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
           pip install marker-pdf
           sudo apt-get install -y zip jq
           
-          # Download pre-compiled llama-server to avoid slow Homebrew builds
-          ASSET_URL=$(curl -s https://api.github.com/repos/ggml-org/llama.cpp/releases/latest | jq -r '.assets[] | select(.name | contains("ubuntu-x64")) | .browser_download_url' | head -n 1)
+          # Use GITHUB_TOKEN to avoid unauthenticated API rate limits
+          ASSET_URL=$(curl -s -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/ggml-org/llama.cpp/releases/latest | jq -r '.assets[] | select(.name | contains("ubuntu-x64")) | .browser_download_url' | head -n 1)
+          
+          if [ -z "$ASSET_URL" ] || [ "$ASSET_URL" == "null" ]; then
+            echo "Error: Failed to extract the llama.cpp asset URL."
+            exit 1
+          fi
+          
           curl -L -o llama.zip "$ASSET_URL"
           unzip llama.zip -d llama_cpp
           sudo find llama_cpp -name "llama-server" -exec cp {} /usr/local/bin/ \;
@@ -35,7 +44,7 @@ jobs:
         run: |
           PDF_URL=$(echo "${{ github.event.issue.body }}" | grep -oP 'https://github\.com/user-attachments/(files|assets)/[^)]+\.pdf' | head -n 1)
           if [ -z "$PDF_URL" ]; then
-            echo "No PDF found."
+            echo "No PDF found in the issue body."
             exit 1
           fi
           curl -L -o document.pdf "$PDF_URL"

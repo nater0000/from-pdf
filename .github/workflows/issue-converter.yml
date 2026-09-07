@@ -19,19 +19,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
-      - name: Install Tools and Llama.cpp
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
+      - run: |
           pip install marker-pdf
           sudo apt-get install -y zip
-          
-          # Use native GitHub CLI to download the release, bypassing curl rate limits
-          gh release download --repo ggml-org/llama.cpp --pattern "*ubuntu-x86_64.zip" --dir llama_temp
-          unzip llama_temp/*.zip -d llama_cpp
-          sudo find llama_cpp -name "llama-server" -exec cp {} /usr/local/bin/ \;
-          sudo chmod +x /usr/local/bin/llama-server
 
       - name: Extract PDF URL and Download
         id: extract
@@ -46,7 +36,8 @@ jobs:
       - name: Convert PDF to Markdown
         run: |
           mkdir -p conversions/issue-${{ github.event.issue.number }}
-          marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }}
+          # Use --disable_ocr to bypass llama-server completely
+          marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }} --disable_ocr
 
       - name: Create MD Plus Archive
         run: |

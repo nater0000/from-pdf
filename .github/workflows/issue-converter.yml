@@ -21,8 +21,14 @@ jobs:
           python-version: '3.10'
       - run: |
           pip install marker-pdf
-          sudo apt-get install -y zip
-          brew install llama.cpp
+          sudo apt-get install -y zip jq
+          
+          # Download pre-compiled llama-server to avoid slow Homebrew builds
+          ASSET_URL=$(curl -s https://api.github.com/repos/ggml-org/llama.cpp/releases/latest | jq -r '.assets[] | select(.name | contains("ubuntu-x64")) | .browser_download_url' | head -n 1)
+          curl -L -o llama.zip "$ASSET_URL"
+          unzip llama.zip -d llama_cpp
+          sudo find llama_cpp -name "llama-server" -exec cp {} /usr/local/bin/ \;
+          sudo chmod +x /usr/local/bin/llama-server
 
       - name: Extract PDF URL and Download
         id: extract

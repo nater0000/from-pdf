@@ -2,7 +2,7 @@ name: Issue PDF Converter
 
 on:
   issues:
-    types: [opened]
+    types: [opened, edited, reopened]
 
 permissions:
   contents: write

@@ -1,0 +1,33 @@
+name: Manual File Purge
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue Number to Purge (e.g., 42)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Delete Specific Issue Folder
+        run: |
+          DIR="conversions/issue-${{ inputs.issue_number }}"
+          if [ -d "$DIR" ]; then
+            git rm -r "$DIR"
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git commit -m "Manual purge: Removed files for issue #${{ inputs.issue_number }} [skip ci]"
+            git push
+            echo "Successfully purged $DIR"
+          else
+            echo "Directory $DIR does not exist. Nothing to purge."
+          fi

@@ -19,25 +19,19 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - name: Install Tools and Llama.cpp
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Tools and Build llama.cpp
         run: |
           pip install marker-pdf
-          sudo apt-get install -y zip jq
+          sudo apt-get install -y zip
           
-          # Use GITHUB_TOKEN to avoid unauthenticated API rate limits
-          ASSET_URL=$(curl -s -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/ggml-org/llama.cpp/releases/latest | jq -r '.assets[] | select(.name | contains("ubuntu-x64")) | .browser_download_url' | head -n 1)
-          
-          if [ -z "$ASSET_URL" ] || [ "$ASSET_URL" == "null" ]; then
-            echo "Error: Failed to extract the llama.cpp asset URL."
-            exit 1
-          fi
-          
-          curl -L -o llama.zip "$ASSET_URL"
-          unzip llama.zip -d llama_cpp
-          sudo find llama_cpp -name "llama-server" -exec cp {} /usr/local/bin/ \;
+          # Build llama-server natively to bypass GitHub API rate limits and naming changes
+          git clone --depth 1 https://github.com/ggml-org/llama.cpp.git
+          cd llama.cpp
+          make llama-server -j4
+          sudo cp llama-server /usr/local/bin/
           sudo chmod +x /usr/local/bin/llama-server
+          cd ..
 
       - name: Extract PDF URL and Download
         id: extract

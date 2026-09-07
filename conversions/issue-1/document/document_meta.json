@@ -1,25 +1,25 @@
 {
   "table_of_contents": [
     {
-      "title": "",
+      "title": "SOURCE MATRIX",
       "heading_level": null,
       "page_id": 0,
       "polygon": [
         [
-          13.836856842041016,
-          242.24109649658203
+          14.207999999999998,
+          246.0
         ],
         [
-          365.6341552734375,
-          242.24109649658203
+          366.336,
+          246.0
         ],
         [
-          365.6341552734375,
-          361.93592834472656
+          366.336,
+          357.0
         ],
         [
-          13.836856842041016,
-          361.93592834472656
+          14.207999999999998,
+          357.0
         ]
       ]
     },
@@ -395,15 +395,15 @@
   "page_stats": [
     {
       "page_id": 0,
-      "text_extraction_method": "pdftext",
+      "text_extraction_method": "surya",
       "block_counts": [
         [
           "Text",
-          4
+          8
         ],
         [
           "SectionHeader",
-          1
+          2
         ]
       ],
       "block_metadata": {
@@ -563,11 +563,11 @@
     },
     {
       "page_id": 6,
-      "text_extraction_method": "pdftext",
+      "text_extraction_method": "surya",
       "block_counts": [
         [
           "Picture",
-          1
+          2
         ]
       ],
       "block_metadata": {
@@ -935,11 +935,11 @@
     },
     {
       "page_id": 20,
-      "text_extraction_method": "pdftext",
+      "text_extraction_method": "surya",
       "block_counts": [
         [
           "Picture",
-          1
+          2
         ]
       ],
       "block_metadata": {
@@ -1293,11 +1293,11 @@
     },
     {
       "page_id": 33,
-      "text_extraction_method": "pdftext",
+      "text_extraction_method": "surya",
       "block_counts": [
         [
           "Picture",
-          1
+          2
         ]
       ],
       "block_metadata": {
@@ -1479,11 +1479,11 @@
     },
     {
       "page_id": 40,
-      "text_extraction_method": "pdftext",
+      "text_extraction_method": "surya",
       "block_counts": [
         [
           "Picture",
-          1
+          2
         ]
       ],
       "block_metadata": {
@@ -1695,11 +1695,11 @@
     },
     {
       "page_id": 48,
-      "text_extraction_method": "pdftext",
+      "text_extraction_method": "surya",
       "block_counts": [
         [
           "Picture",
-          1
+          2
         ]
       ],
       "block_metadata": {
@@ -2011,11 +2011,11 @@
     },
     {
       "page_id": 60,
-      "text_extraction_method": "pdftext",
+      "text_extraction_method": "surya",
       "block_counts": [
         [
           "Picture",
-          1
+          2
         ]
       ],
       "block_metadata": {
@@ -2439,11 +2439,11 @@
     },
     {
       "page_id": 76,
-      "text_extraction_method": "pdftext",
+      "text_extraction_method": "surya",
       "block_counts": [
         [
           "Picture",
-          1
+          2
         ]
       ],
       "block_metadata": {
@@ -2651,11 +2651,11 @@
     },
     {
       "page_id": 84,
-      "text_extraction_method": "pdftext",
+      "text_extraction_method": "surya",
       "block_counts": [
         [
           "Picture",
-          1
+          2
         ]
       ],
       "block_metadata": {
@@ -3099,11 +3099,11 @@
     },
     {
       "page_id": 100,
-      "text_extraction_method": "pdftext",
+      "text_extraction_method": "surya",
       "block_counts": [
         [
           "Picture",
-          1
+          2
         ]
       ],
       "block_metadata": {
@@ -3625,11 +3625,11 @@
     },
     {
       "page_id": 119,
-      "text_extraction_method": "pdftext",
+      "text_extraction_method": "surya",
       "block_counts": [
         [
           "Picture",
-          1
+          2
         ]
       ],
       "block_metadata": {
@@ -3803,11 +3803,11 @@
     },
     {
       "page_id": 126,
-      "text_extraction_method": "pdftext",
+      "text_extraction_method": "surya",
       "block_counts": [
         [
           "Picture",
-          1
+          2
         ]
       ],
       "block_metadata": {
@@ -4049,11 +4049,11 @@
     },
     {
       "page_id": 135,
-      "text_extraction_method": "pdftext",
+      "text_extraction_method": "surya",
       "block_counts": [
         [
           "Picture",
-          1
+          2
         ]
       ],
       "block_metadata": {
@@ -4389,11 +4389,11 @@
     },
     {
       "page_id": 147,
-      "text_extraction_method": "pdftext",
+      "text_extraction_method": "surya",
       "block_counts": [
         [
           "Picture",
-          1
+          2
         ]
       ],
       "block_metadata": {
@@ -4803,11 +4803,11 @@
     },
     {
       "page_id": 162,
-      "text_extraction_method": "pdftext",
+      "text_extraction_method": "surya",
       "block_counts": [
         [
           "Picture",
-          1
+          2
         ]
       ],
       "block_metadata": {
@@ -4959,8 +4959,13 @@
     },
     {
       "page_id": 168,
-      "text_extraction_method": "pdftext",
-      "block_counts": [],
+      "text_extraction_method": "surya",
+      "block_counts": [
+        [
+          "Picture",
+          1
+        ]
+      ],
       "block_metadata": {
         "llm_request_count": 0,
         "llm_error_count": 0,
@@ -5282,11 +5287,11 @@
     },
     {
       "page_id": 180,
-      "text_extraction_method": "pdftext",
+      "text_extraction_method": "surya",
       "block_counts": [
         [
           "Picture",
-          1
+          2
         ]
       ],
       "block_metadata": {
@@ -5722,11 +5727,11 @@
     },
     {
       "page_id": 196,
-      "text_extraction_method": "pdftext",
+      "text_extraction_method": "surya",
       "block_counts": [
         [
           "Picture",
-          1
+          2
         ]
       ],
       "block_metadata": {
@@ -5856,11 +5861,11 @@
     },
     {
       "page_id": 201,
-      "text_extraction_method": "pdftext",
+      "text_extraction_method": "surya",
       "block_counts": [
         [
           "Picture",
-          1
+          2
         ]
       ],
       "block_metadata": {
@@ -6262,11 +6267,11 @@
     },
     {
       "page_id": 216,
-      "text_extraction_method": "pdftext",
+      "text_extraction_method": "surya",
       "block_counts": [
         [
           "Picture",
-          1
+          2
         ]
       ],
       "block_metadata": {

@@ -39,8 +39,8 @@ jobs:
       - name: Convert PDF to Markdown
         run: |
           mkdir -p conversions/issue-${{ github.event.issue.number }}
-          # Use --disable_ocr to bypass llama-server completely
-          marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }} --disable_ocr
+          # Not using --disable_ocr to bypass llama-server completely
+          marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }}
 
       - name: Create MD Plus Archive
         run: |

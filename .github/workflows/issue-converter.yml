@@ -95,4 +95,3 @@ jobs:
               repo: repo,
               state: 'closed'
             });
-o

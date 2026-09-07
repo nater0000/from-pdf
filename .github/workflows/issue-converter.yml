@@ -44,22 +44,30 @@ jobs:
           fi
           curl -L -o document.pdf "$PDF_URL"
 
-      - name: Convert PDF to Markdown
+      - name: Convert PDF (Corrupted Text Layer)
         run: |
-          mkdir -p conversions/issue-${{ github.event.issue.number }}
-          marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }} --force_ocr --mode fast
+          mkdir -p conversions/issue-${{ github.event.issue.number }}/corrupted
+          # --disable_ocr forces the fast, corrupted text-layer extraction
+          marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }}/corrupted --mode fast --disable_ocr --page_range 1-5
 
-      - name: Create MD Plus Archive
+      - name: Convert PDF (Fixed Visual OCR)
         run: |
-          cd conversions/issue-${{ github.event.issue.number }}/document
-          zip -r ../document_plus.zip ./*
+          mkdir -p conversions/issue-${{ github.event.issue.number }}/fixed
+          # --force_ocr forces the slower, accurate visual reading
+          marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }}/fixed --mode fast --force_ocr --page_range 1-5
+
+      - name: Create Comparison Archive
+        run: |
+          cd conversions/issue-${{ github.event.issue.number }}
+          # Zips both the corrupted and fixed folders together
+          zip -r comparison_archive.zip corrupted/ fixed/
 
       - name: Commit Generated Files
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add conversions/issue-${{ github.event.issue.number }}/
-          git commit -m "Auto-generate markdown and zip for issue #${{ github.event.issue.number }} [skip ci]" || echo "No changes to commit"
+          git commit -m "Auto-generate comparison for issue #${{ github.event.issue.number }} [skip ci]" || echo "No changes to commit"
           git push
 
       - name: Post Direct Download Links
@@ -70,14 +78,15 @@ jobs:
             const repo = context.repo.repo;
             const issueNum = context.issue.number;
             
-            const rawMdUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/conversions/issue-${issueNum}/document/document.md`;
-            const rawZipUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/conversions/issue-${issueNum}/document_plus.zip`;
+            const rawCorruptedUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/conversions/issue-${issueNum}/corrupted/document/document.md`;
+            const rawFixedUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/conversions/issue-${issueNum}/fixed/document/document.md`;
+            const rawZipUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/conversions/issue-${issueNum}/comparison_archive.zip`;
             
             await github.rest.issues.createComment({
               issue_number: issueNum,
               owner: owner,
               repo: repo,
-              body: `✅ **Conversion Complete!**\n\nYour files have been processed and saved directly to the repository.\n\n📄 **MD Only:** [Download Raw Markdown](${rawMdUrl})\n📦 **MD Plus:** [Download Zip Archive (MD + Images)](${rawZipUrl})\n\n*Note: Right-click the Markdown link and select "Save Link As..." to download.*`
+              body: `✅ **Comparison Complete (Pages 1-5)!**\n\n📄 **Corrupted Text Layer:** [Download .md](${rawCorruptedUrl})\n📄 **Fixed Visual OCR:** [Download .md](${rawFixedUrl})\n📦 **Both Versions + Images:** [Download .zip](${rawZipUrl})`
             });
             
             await github.rest.issues.update({
@@ -86,3 +95,4 @@ jobs:
               repo: repo,
               state: 'closed'
             });
+o

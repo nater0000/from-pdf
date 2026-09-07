@@ -21,10 +21,18 @@ jobs:
           python-version: '3.10'
           cache: 'pip'
 
-      - name: Install Tools and Dependencies
+      - name: Install Tools and Build llama.cpp
         run: |
           pip install .
-          sudo apt-get install -y zip
+          sudo apt-get install -y zip cmake
+          
+          # Build standalone llama-server natively using CMake
+          git clone --depth 1 https://github.com/ggml-org/llama.cpp.git
+          cd llama.cpp
+          cmake -B build
+          cmake --build build --config Release -j 4 --target llama-server
+          sudo cp build/bin/llama-server /usr/local/bin/
+          sudo chmod +x /usr/local/bin/llama-server
 
       - name: Extract PDF URL and Download
         id: extract

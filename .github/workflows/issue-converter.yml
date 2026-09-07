@@ -20,18 +20,18 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install Tools and Build llama.cpp
+      - name: Install Tools and Llama.cpp
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           pip install marker-pdf
           sudo apt-get install -y zip
           
-          # Build llama-server natively to bypass GitHub API rate limits and naming changes
-          git clone --depth 1 https://github.com/ggml-org/llama.cpp.git
-          cd llama.cpp
-          make llama-server -j4
-          sudo cp llama-server /usr/local/bin/
+          # Use native GitHub CLI to download the release, bypassing curl rate limits
+          gh release download --repo ggml-org/llama.cpp --pattern "*ubuntu-x86_64.zip" --dir llama_temp
+          unzip llama_temp/*.zip -d llama_cpp
+          sudo find llama_cpp -name "llama-server" -exec cp {} /usr/local/bin/ \;
           sudo chmod +x /usr/local/bin/llama-server
-          cd ..
 
       - name: Extract PDF URL and Download
         id: extract

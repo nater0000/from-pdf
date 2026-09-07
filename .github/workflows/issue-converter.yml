@@ -22,6 +22,7 @@ jobs:
       - run: |
           pip install marker-pdf
           sudo apt-get install -y zip
+          brew install llama.cpp
 
       - name: Extract PDF URL and Download
         id: extract

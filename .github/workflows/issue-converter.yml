@@ -1,0 +1,77 @@
+name: Issue PDF Converter
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python & Install Dependencies
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: |
+          pip install marker-pdf
+          sudo apt-get install -y zip
+
+      - name: Extract PDF URL and Download
+        id: extract
+        run: |
+          PDF_URL=$(echo "${{ github.event.issue.body }}" | grep -oP 'https://github\.com/user-attachments/(files|assets)/[^)]+\.pdf' | head -n 1)
+          if [ -z "$PDF_URL" ]; then
+            echo "No PDF found."
+            exit 1
+          fi
+          curl -L -o document.pdf "$PDF_URL"
+
+      - name: Convert PDF to Markdown
+        run: |
+          mkdir -p conversions/issue-${{ github.event.issue.number }}
+          marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }}
+
+      - name: Create MD Plus Archive
+        run: |
+          cd conversions/issue-${{ github.event.issue.number }}/document
+          zip -r ../document_plus.zip ./*
+
+      - name: Commit Generated Files
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add conversions/issue-${{ github.event.issue.number }}/
+          git commit -m "Auto-generate markdown and zip for issue #${{ github.event.issue.number }} [skip ci]" || echo "No changes to commit"
+          git push
+
+      - name: Post Direct Download Links
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issueNum = context.issue.number;
+            
+            const rawMdUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/conversions/issue-${issueNum}/document/document.md`;
+            const rawZipUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/conversions/issue-${issueNum}/document_plus.zip`;
+            
+            await github.rest.issues.createComment({
+              issue_number: issueNum,
+              owner: owner,
+              repo: repo,
+              body: `✅ **Conversion Complete!**\n\nYour files have been processed and saved directly to the repository.\n\n📄 **MD Only:** [Download Raw Markdown](${rawMdUrl})\n📦 **MD Plus:** [Download Zip Archive (MD + Images)](${rawZipUrl})\n\n*Note: Right-click the Markdown link and select "Save Link As..." to download.*`
+            });
+            
+            await github.rest.issues.update({
+              issue_number: issueNum,
+              owner: owner,
+              repo: repo,
+              state: 'closed'
+            });

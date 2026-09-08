@@ -91,7 +91,6 @@ jobs:
           else
             rm -rf conversions/issue-${{ github.event.issue.number }}/corrupted
             mkdir -p conversions/issue-${{ github.event.issue.number }}/corrupted
-            # $PAGE_ARG dynamically injects the page range if provided, or is blank for the whole document
             marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }}/corrupted --mode fast --disable_ocr $PAGE_ARG
           fi
 
@@ -139,7 +138,7 @@ jobs:
               final_text = final_text.replace('∆∆', '**').replace('∆', '*')
               return final_text
 
-          def call_gemini_with_backoff(client, model, prompt, base_delay=5, max_delay=60, max_retries=5):
+          def call_gemini_with_backoff(client, model, prompt, base_delay=5, max_delay=60, max_retries=30):
               delay = base_delay
               attempt = 1
               while True:
@@ -160,6 +159,7 @@ jobs:
                       if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str:
                           match = re.search(r'retry in ([\d\.]+)s', error_str, re.IGNORECASE)
                           if match:
+                              # Use exactly what the API asks for + a 2-second safety buffer
                               wait_time = float(match.group(1)) + 2.0
                               print(f"🛑 Rate limit hit (Attempt {attempt}/{max_retries}). Pausing exactly {wait_time:.1f}s as requested by API...", flush=True)
                           else:
@@ -240,7 +240,8 @@ jobs:
           </clean_ocr_text>
           """
                   
-                  aligned_text = call_gemini_with_backoff(client, 'gemini-3.6-flash', prompt)
+                  # Corrected Model Call
+                  aligned_text = call_gemini_with_backoff(client, 'gemini-1.5-flash', prompt)
                   
                   match = re.search(r'<aligned_text>(.*?)</aligned_text>', aligned_text, re.DOTALL | re.IGNORECASE)
                   if match:
@@ -249,6 +250,10 @@ jobs:
                       clean_aligned = aligned_text.replace('```markdown', '').replace('```', '').strip()
                       
                   aligned_chunks.append(clean_aligned)
+                  
+                  # Pacing the API to naturally smooth out Token-Per-Minute quotas
+                  print("✅ Batch processed successfully. Pacing API...", flush=True)
+                  time.sleep(10)
                   
               print(f"-> Stitching and saving perfectly aligned markdown to: {output_path}", flush=True)
               with open(output_path, 'w', encoding='utf-8') as f:

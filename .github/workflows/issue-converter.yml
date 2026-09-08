@@ -44,29 +44,97 @@ jobs:
           fi
           curl -L -o document.pdf "$PDF_URL"
 
-      - name: Convert PDF to Markdown
+      - name: Convert PDF (Corrupted Text Layer for Styling)
+        run: |
+          # Remove any cached conversions from previous runs to prevent conflicts
+          rm -rf conversions/issue-${{ github.event.issue.number }}
+          mkdir -p conversions/issue-${{ github.event.issue.number }}/corrupted
+          
+          # --disable_ocr forces the fast, corrupted text-layer extraction to capture bold/italics
+          marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }}/corrupted --mode fast --disable_ocr --page_range 1-5
+
+      - name: Convert PDF (Fixed Visual OCR for Clean Spacing)
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
         run: |
-          # Remove any cached conversions from previous runs
-          rm -rf conversions/issue-${{ github.event.issue.number }}
-          mkdir -p conversions/issue-${{ github.event.issue.number }}
+          mkdir -p conversions/issue-${{ github.event.issue.number }}/fixed
           
-          # Run visual OCR with LLM formatting on a 5-page sample
-          marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }} --mode fast --force_ocr --use_llm --debug --page_range 1-5
+          # --force_ocr forces the slower, accurate visual reading
+          # --use_llm formats broader structures
+          marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }}/fixed --mode fast --force_ocr --use_llm --debug --page_range 1-5
 
-      - name: Create MD Plus Archive
+      - name: Merge Formatting into Clean Text
         run: |
-          cd conversions/issue-${{ github.event.issue.number }}/document
-          zip -r ../document_plus.zip ./*
+          cat << 'EOF' > merge_styles.py
+          import sys
+          from pathlib import Path
+          
+          def merge_markdown(corrupted_path, clean_path, output_path):
+              with open(corrupted_path, 'r', encoding='utf-8') as f:
+                  corrupted = f.read()
+              with open(clean_path, 'r', encoding='utf-8') as f:
+                  clean = f.read()
+                  
+              # Extract all bold/italic tags and their relative positions ignoring spaces
+              tags = []
+              clean_corrupted = ""
+              for char in corrupted:
+                  if char in ['*', '_']:
+                      tags.append((len(clean_corrupted), char))
+                  elif not char.isspace():
+                      clean_corrupted += char
+                      
+              # Re-inject tags into the clean text based on non-space character counts
+              merged = ""
+              clean_idx = 0
+              tag_idx = 0
+              
+              for char in clean:
+                  # Inject any tags that belong at this character position
+                  while tag_idx < len(tags) and tags[tag_idx][0] == clean_idx:
+                      merged += tags[tag_idx][1]
+                      tag_idx += 1
+                      
+                  merged += char
+                  if not char.isspace():
+                      clean_idx += 1
+              
+              # Append any remaining trailing tags
+              while tag_idx < len(tags):
+                  merged += tags[tag_idx][1]
+                  tag_idx += 1
+                  
+              with open(output_path, 'w', encoding='utf-8') as f:
+                  f.write(merged)
+                  
+          if __name__ == "__main__":
+              issue_num = sys.argv[1]
+              corrupted_md = Path(f"conversions/issue-{issue_num}/corrupted/document/document.md")
+              clean_md = Path(f"conversions/issue-{issue_num}/fixed/document/document.md")
+              output_md = Path(f"conversions/issue-{issue_num}/document_merged.md")
+              
+              if corrupted_md.exists() and clean_md.exists():
+                  merge_markdown(corrupted_md, clean_md, output_md)
+                  print("✅ Successfully merged formatting into clean text.")
+              else:
+                  print("❌ Missing input files for merge.")
+          EOF
+          
+          python merge_styles.py ${{ github.event.issue.number }}
+
+      - name: Create Merged Archive
+        run: |
+          cd conversions/issue-${{ github.event.issue.number }}
+          # Zips the merged markdown file and the fixed document's image assets together
+          zip -r merged_output.zip document_merged.md fixed/document/
 
       - name: Commit Generated Files
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add conversions/issue-${{ github.event.issue.number }}/
-          git commit -m "Auto-generate markdown and zip for issue #${{ github.event.issue.number }} [skip ci]" || echo "No changes to commit"
+          git commit -m "Auto-generate merged markdown for issue #${{ github.event.issue.number }} [skip ci]" || echo "No changes to commit"
           git push
 
       - name: Post Direct Download Links
@@ -77,14 +145,14 @@ jobs:
             const repo = context.repo.repo;
             const issueNum = context.issue.number;
             
-            const rawMdUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/conversions/issue-${issueNum}/document/document.md`;
-            const rawZipUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/conversions/issue-${issueNum}/document_plus.zip`;
+            const rawMdUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/conversions/issue-${issueNum}/document_merged.md`;
+            const rawZipUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/conversions/issue-${issueNum}/merged_output.zip`;
             
             await github.rest.issues.createComment({
               issue_number: issueNum,
               owner: owner,
               repo: repo,
-              body: `✅ **Conversion Complete!**\n\nYour files have been processed and saved directly to the repository.\n\n📄 **MD Only:** [Download Raw Markdown](${rawMdUrl})\n📦 **MD Plus:** [Download Zip Archive (MD + Images)](${rawZipUrl})\n\n*Note: Right-click the Markdown link and select "Save Link As..." to download.*`
+              body: `✅ **Conversion & Merge Complete (Pages 1-5)!**\n\nYour files have been processed and saved directly to the repository.\n\n📄 **Merged MD Only:** [Download Raw Markdown](${rawMdUrl})\n📦 **Merged MD + Images:** [Download Zip Archive](${rawZipUrl})\n\n*Note: Right-click the Markdown link and select "Save Link As..." to download.*`
             });
             
             await github.rest.issues.update({

@@ -47,7 +47,8 @@ jobs:
       - name: Convert PDF to Markdown
         run: |
           mkdir -p conversions/issue-${{ github.event.issue.number }}
-          marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }} --mode fast --force_ocr
+          marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }} --mode fast --force_ocr --use_llm --page_range 1-5
+
 
       - name: Create MD Plus Archive
         run: |

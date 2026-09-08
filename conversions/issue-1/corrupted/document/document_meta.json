@@ -1,25 +1,25 @@
 {
   "table_of_contents": [
     {
-      "title": "INTRODUCTION",
+      "title": "I N T R O D U C T I O N",
       "heading_level": null,
       "page_id": 1,
       "polygon": [
         [
-          135.168,
-          33.59999901199341
+          136.16176986694336,
+          29.76664924621582
         ],
         [
-          244.608,
-          33.59999901199341
+          244.34628295898438,
+          29.76664924621582
         ],
         [
-          244.608,
-          44.399998694419864
+          244.34628295898438,
+          43.48988580703735
         ],
         [
-          135.168,
-          44.399998694419864
+          136.16176986694336,
+          43.48988580703735
         ]
       ]
     }
@@ -27,21 +27,29 @@
   "page_stats": [
     {
       "page_id": 1,
-      "text_extraction_method": "surya",
+      "text_extraction_method": "pdftext",
       "block_counts": [
         [
+          "Span",
+          1819
+        ],
+        [
+          "Line",
+          27
+        ],
+        [
           "SectionHeader",
-          2
+          1
         ],
         [
           "Text",
-          2
+          1
         ]
       ],
       "block_metadata": {
-        "llm_request_count": 1,
+        "llm_request_count": 0,
         "llm_error_count": 0,
-        "llm_tokens_used": 1528,
+        "llm_tokens_used": 0,
         "previous_text": "",
         "previous_type": "",
         "previous_order": 0
@@ -49,11 +57,19 @@
     },
     {
       "page_id": 2,
-      "text_extraction_method": "surya",
+      "text_extraction_method": "pdftext",
       "block_counts": [
         [
+          "Span",
+          2033
+        ],
+        [
+          "Line",
+          29
+        ],
+        [
           "Text",
-          2
+          1
         ]
       ],
       "block_metadata": {
@@ -67,15 +83,23 @@
     },
     {
       "page_id": 3,
-      "text_extraction_method": "surya",
+      "text_extraction_method": "pdftext",
       "block_counts": [
         [
+          "Span",
+          1843
+        ],
+        [
+          "Line",
+          25
+        ],
+        [
           "Text",
-          2
+          1
         ],
         [
           "Picture",
-          2
+          1
         ]
       ],
       "block_metadata": {
@@ -89,15 +113,23 @@
     },
     {
       "page_id": 4,
-      "text_extraction_method": "surya",
+      "text_extraction_method": "pdftext",
       "block_counts": [
         [
+          "Span",
+          433
+        ],
+        [
+          "Line",
+          6
+        ],
+        [
           "Text",
-          2
+          1
         ],
         [
           "Picture",
-          2
+          1
         ]
       ],
       "block_metadata": {
@@ -111,15 +143,23 @@
     },
     {
       "page_id": 5,
-      "text_extraction_method": "surya",
+      "text_extraction_method": "pdftext",
       "block_counts": [
         [
+          "Span",
+          1137
+        ],
+        [
+          "Line",
+          17
+        ],
+        [
           "Text",
-          6
+          3
         ],
         [
           "Picture",
-          2
+          1
         ]
       ],
       "block_metadata": {
@@ -132,5 +172,5 @@
       }
     }
   ],
-  "debug_data_path": "conversions/issue-1/document"
+  "debug_data_path": "debug_data/document"
 }

@@ -105,7 +105,24 @@ jobs:
                           contents=prompt
                       )
                       return response.text
-                  except (errors.ServerError, errors.APIError) as e:
+                  except Exception as e:
+                      error_str = str(e)
+                      
+                      # Smart Intercept for 429 RPM Quota Exhaustion
+                      if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str:
+                          match = re.search(r'retry in ([\d\.]+)s', error_str, re.IGNORECASE)
+                          if match:
+                              # Use exactly what the API asks for + a 2-second safety buffer
+                              wait_time = float(match.group(1)) + 2.0
+                              print(f"🛑 Rate limit hit (20 RPM). Pausing exactly {wait_time:.1f}s as requested by API...")
+                          else:
+                              wait_time = 65.0
+                              print(f"🛑 Rate limit hit. Pausing {wait_time}s...")
+                          
+                          time.sleep(wait_time)
+                          continue # Skip exponential delay increment
+
+                      # Fallback for standard 500/503 temporary server errors
                       jitter = random.uniform(0.5, 2.0)
                       wait_time = delay + jitter
                       print(f"⚠️ API temporary error: {e}. Retrying in {wait_time:.1f}s...")

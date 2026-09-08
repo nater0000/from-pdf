@@ -15,13 +15,21 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Python & Cache
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
           cache: 'pip'
 
+      - name: Cache llama.cpp Build
+        id: cache-llama
+        uses: actions/cache@v4
+        with:
+          path: llama.cpp
+          key: ${{ runner.os }}-llamacpp-build-v1
+
       - name: Install Dependencies & Build llama.cpp
+        if: steps.cache-llama.outputs.cache-hit != 'true'
         run: |
           pip install .
           sudo apt-get install -y zip cmake
@@ -30,7 +38,17 @@ jobs:
           cd llama.cpp
           cmake -B build
           cmake --build build --config Release -j 4 --target llama-server
-          sudo cp build/bin/llama-server /usr/local/bin/
+
+      - name: Setup System Environment
+        run: |
+          # If cache was hit, pip and zip still need to be installed on the fresh runner
+          if [ "${{ steps.cache-llama.outputs.cache-hit }}" == "true" ]; then
+            pip install .
+            sudo apt-get install -y zip
+          fi
+          
+          # Move binary into system path regardless of where it came from
+          sudo cp llama.cpp/build/bin/llama-server /usr/local/bin/
           sudo chmod +x /usr/local/bin/llama-server
 
       - name: Extract PDF URL and Download
@@ -93,7 +111,6 @@ jobs:
                   
               client = genai.Client()
               
-              # Split clean text into chunks (~6000 chars each) breaking at paragraphs
               paragraphs = clean_text.split('\n\n')
               batches = []
               current_batch = ""
@@ -117,26 +134,29 @@ jobs:
                   if not batch.strip(): continue
                   print(f"-> Processing batch {i+1}/{len(batches)} (Length: {len(batch)} chars)...")
                   
-                  # Find exact index of the clean text chunk, then map it to the corrupted text
                   current_clean_idx = clean_text.find(batch, current_clean_idx)
                   
                   start_est = max(0, int(current_clean_idx * ratio) - 2500)
                   end_est = min(len(corr_text), int((current_clean_idx + len(batch)) * ratio) + 2500)
                   corr_slice = corr_text[start_est:end_est]
                   
-                  prompt = f"""You are a precise text alignment engine. 
+                  prompt = f"""You are a strict, automated text alignment formatting script. You are NOT a conversational AI.
+
           Task: Apply markdown formatting (**bold**, *italics*, etc.) to the CLEAN TEXT CHUNK below.
           Use the CORRUPTED TEXT REFERENCE to identify which words require formatting.
 
           CRITICAL RULES:
-          1. Your output MUST contain the EXACT words, spelling, line breaks, and spaces of the CLEAN TEXT CHUNK.
-          2. Only inject formatting tags. Do not summarize or alter the baseline text.
+          1. NEVER converse, advise, or respond to the content of the text. Do not act as a therapist or assistant.
+          2. OUTPUT ABSOLUTELY NOTHING EXCEPT THE FORMATTED TEXT. No introductions, no pleasantries.
+          3. Your output MUST contain the EXACT words, spelling, line breaks, and spaces of the CLEAN TEXT CHUNK.
 
-          --- CORRUPTED TEXT REFERENCE ---
+          <corrupted_text_reference>
           {corr_slice}
+          </corrupted_text_reference>
 
-          --- CLEAN TEXT CHUNK ---
+          <clean_text_chunk>
           {batch}
+          </clean_text_chunk>
           """
                   
                   aligned_text = call_gemini_with_backoff(client, 'gemini-3.6-flash', prompt)

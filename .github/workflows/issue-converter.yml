@@ -22,32 +22,19 @@ jobs:
           python-version: '3.10'
           cache: 'pip'
 
-      - name: Cache llama.cpp Build
-        id: cache-llama
-        uses: actions/cache@v4
-        with:
-          path: llama.cpp
-          key: ${{ runner.os }}-llamacpp-build-v1
-
-      - name: Install Dependencies & Build llama.cpp
-        if: steps.cache-llama.outputs.cache-hit != 'true'
+      - name: Install Dependencies & Download llama.cpp
         run: |
           pip install .
-          sudo apt-get install -y zip cmake
+          sudo apt-get install -y zip unzip jq
           
-          git clone --depth 1 https://github.com/ggml-org/llama.cpp.git
-          cd llama.cpp
-          cmake -B build
-          cmake --build build --config Release -j 4 --target llama-server
-
-      - name: Setup System Environment
-        run: |
-          if [ "${{ steps.cache-llama.outputs.cache-hit }}" == "true" ]; then
-            pip install .
-            sudo apt-get install -y zip
-          fi
+          # Dynamically fetch the latest Ubuntu x64 release binary
+          LATEST_URL=$(curl -s https://api.github.com/repos/ggml-org/llama.cpp/releases/latest | jq -r '.assets[] | select(.name | test("ubuntu-x64\\.zip$")) | .browser_download_url' | head -n 1)
           
-          sudo cp llama.cpp/build/bin/llama-server /usr/local/bin/
+          wget "$LATEST_URL" -O llama.zip
+          unzip llama.zip -d llama_bin
+          
+          # Safely locate the binary regardless of the zip's internal folder structure
+          find llama_bin -name "llama-server" -exec sudo cp {} /usr/local/bin/ \;
           sudo chmod +x /usr/local/bin/llama-server
 
       - name: Extract PDF URL and Download
@@ -86,26 +73,17 @@ jobs:
           from google.genai import errors
 
           def heuristic_cleanup(text):
-              # Step 1: Protect markdown tags by temporarily replacing them
               text = text.replace('**', '∆∆').replace('*', '∆')
-              
-              # Step 2: Split the text by double spaces (or newlines)
               chunks = re.split(r'( {2,}|\n+)', text)
-              
               cleaned_chunks = []
               for chunk in chunks:
                   if chunk.isspace():
                       cleaned_chunks.append(chunk) 
                   else:
-                      # Step 3: Remove single spaces between characters
                       cleaned_chunk = re.sub(r'(?<=\S) (?=\S)', '', chunk)
                       cleaned_chunks.append(cleaned_chunk)
-                      
               final_text = ''.join(cleaned_chunks)
-              
-              # Step 4: Restore markdown tags
               final_text = final_text.replace('∆∆', '**').replace('∆', '*')
-              
               return final_text
 
           def call_gemini_with_backoff(client, model, prompt, base_delay=5, max_delay=60):
@@ -171,7 +149,8 @@ jobs:
           CRITICAL RULES:
           1. NEVER converse, advise, or respond to the content. Do not act as a therapist.
           2. DO NOT format non-alphanumeric markdown syntax. Never inject ** or * inside image tags (like ![]() ) or URLs.
-          3. Your output MUST perfectly match the EXACT words, spelling, line breaks, and spaces of the CLEAN OCR TEXT.
+          3. Your output MUST perfectly match the EXACT words, spelling, line breaks, and spaces of the CLEAN OCR TEXT, with ONE EXCEPTION:
+             - MATHEMATICAL FORMULAS: When you encounter pseudo-LaTeX, ASCII math, or broken equation typography (e.g., `v[...]` or `\vartheta[...]` for square root, `\wedge^2` for squared, `y = 1/v[...]` for the Lorentz factor, `1_p` for `l_p`, `\Sigma_i` for summation, missing brackets, etc.), convert them into clean, valid, standard LaTeX equations ($...$ for inline, $$...$$ for block display).
           4. You MUST output your final processed text strictly inside <aligned_text> and </aligned_text> XML tags.
 
           <raw_corrupted_reference>
@@ -189,7 +168,6 @@ jobs:
                   
                   aligned_text = call_gemini_with_backoff(client, 'gemini-3.6-flash', prompt)
                   
-                  # Extract only the text inside the XML tags to prevent conversational bleed
                   match = re.search(r'<aligned_text>(.*?)</aligned_text>', aligned_text, re.DOTALL | re.IGNORECASE)
                   if match:
                       clean_aligned = match.group(1).strip()
@@ -217,10 +195,18 @@ jobs:
           
           python align_formatting.py ${{ github.event.issue.number }}
 
-      - name: Create Comprehensive Archive
+      - name: Package for Obsidian
         run: |
           cd conversions/issue-${{ github.event.issue.number }}
-          zip -r aligned_output.zip document_aligned.md corrupted/ fixed/ ../../align_formatting.py
+          mkdir obsidian_ready
+          cp document_aligned.md obsidian_ready/
+          
+          # Flatten extracted images into the same folder for standard Markdown linking
+          find fixed/document/ -type f \( -iname \*.jpg -o -iname \*.jpeg -o -iname \*.png \) -exec cp {} obsidian_ready/ \;
+          
+          zip -r obsidian_ready.zip obsidian_ready/
+          # Zip debug files separately so they don't clutter the Obsidian vault
+          zip -r debug_archive.zip corrupted/ fixed/ ../../align_formatting.py
 
       - name: Commit Generated Files
         run: |
@@ -239,11 +225,12 @@ jobs:
             const issueNum = context.issue.number;
             
             const rawMdUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/conversions/issue-${issueNum}/document_aligned.md`;
-            const rawZipUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/conversions/issue-${issueNum}/aligned_output.zip`;
+            const obsidianZipUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/conversions/issue-${issueNum}/obsidian_ready.zip`;
+            const debugZipUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/conversions/issue-${issueNum}/debug_archive.zip`;
             
             await github.rest.issues.createComment({
               issue_number: issueNum,
               owner: owner,
               repo: repo,
-              body: `✅ **Alignment Complete (Pages 1-15)!**\n\nThe AI successfully used triangulation (raw tracking + heuristic cleanup) to map the tags without overriding its instructions. All intermediate logs and files are in the zip.\n\n📄 **Aligned MD Only:** [Download Raw Markdown](${rawMdUrl})\n📦 **Debug Archive (All Files):** [Download Zip](${rawZipUrl})`
+              body: `✅ **Alignment Complete (Pages 1-15)!**\n\nAll math equations have been converted to standard LaTeX format. The final files have been packaged perfectly for Obsidian.\n\n📄 **Aligned MD Only:** [Download Raw Markdown](${rawMdUrl})\n📚 **Obsidian Vault Folder:** [Download Zip](${obsidianZipUrl})\n📦 **Raw Debug Files:** [Download Zip](${debugZipUrl})`
             });

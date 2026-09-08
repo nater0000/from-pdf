@@ -56,16 +56,59 @@ jobs:
           fi
           curl -L -o document.pdf "$PDF_URL"
 
+      - name: Fetch Latest Checkpoints
+        run: |
+          # If a previous run failed but saved a checkpoint, ensure we pull it down
+          # before evaluating the skip logic (vital for "Re-run failed jobs" clicks)
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config pull.rebase false
+          git pull origin main || echo "No new commits to pull"
+
+      - name: Parse Issue Commands
+        run: |
+          # Check for Force OCR command
+          if echo "${{ github.event.issue.body }}" | grep -iq "/force-ocr"; then
+            echo "⚠️ /force-ocr command detected. Clearing cached OCR data..."
+            rm -rf conversions/issue-${{ github.event.issue.number }}/corrupted
+            rm -rf conversions/issue-${{ github.event.issue.number }}/fixed
+          fi
+          
+          # Check for Page Range command (e.g., /page-range 1-15)
+          PAGE_RANGE=$(echo "${{ github.event.issue.body }}" | grep -oP '/page-range\s+\K[\d-]+' | head -n 1)
+          if [ -n "$PAGE_RANGE" ]; then
+            echo "📄 /page-range command detected: $PAGE_RANGE"
+            echo "PAGE_ARG=--page_range $PAGE_RANGE" >> $GITHUB_ENV
+          else
+            echo "📄 No page range specified. Processing entire document."
+            echo "PAGE_ARG=" >> $GITHUB_ENV
+          fi
+
       - name: Convert PDF (Corrupted Text Layer for Styling)
         run: |
-          rm -rf conversions/issue-${{ github.event.issue.number }}
-          mkdir -p conversions/issue-${{ github.event.issue.number }}/corrupted
-          marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }}/corrupted --mode fast --disable_ocr --page_range 1-15
+          if [ -f "conversions/issue-${{ github.event.issue.number }}/corrupted/document/document.md" ]; then
+            echo "✅ Corrupted text layer already extracted. Skipping."
+          else
+            rm -rf conversions/issue-${{ github.event.issue.number }}/corrupted
+            mkdir -p conversions/issue-${{ github.event.issue.number }}/corrupted
+            # $PAGE_ARG dynamically injects the page range if provided, or is blank for the whole document
+            marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }}/corrupted --mode fast --disable_ocr $PAGE_ARG
+          fi
 
       - name: Convert PDF (Fixed Visual OCR for Clean Spacing)
         run: |
-          mkdir -p conversions/issue-${{ github.event.issue.number }}/fixed
-          marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }}/fixed --mode fast --force_ocr --debug --page_range 1-15
+          if [ -f "conversions/issue-${{ github.event.issue.number }}/fixed/document/document.md" ]; then
+            echo "✅ Fixed OCR layer already extracted. Skipping."
+          else
+            mkdir -p conversions/issue-${{ github.event.issue.number }}/fixed
+            marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }}/fixed --mode fast --force_ocr --debug $PAGE_ARG
+          fi
+
+      - name: Checkpoint Commit (Save Raw OCR Progress)
+        run: |
+          git add conversions/issue-${{ github.event.issue.number }}/
+          git commit -m "Checkpoint: Save raw OCR results for issue #${{ github.event.issue.number }} [skip ci]" || echo "No new OCR changes to commit"
+          git push origin HEAD:main
 
       - name: Triangulate & Align Formatting via Gemini
         env:
@@ -224,7 +267,7 @@ jobs:
       - name: Package for Obsidian
         run: |
           cd conversions/issue-${{ github.event.issue.number }}
-          mkdir obsidian_ready
+          mkdir -p obsidian_ready
           cp document_aligned.md obsidian_ready/
           
           # Flatten extracted images into the same folder for standard Markdown linking
@@ -234,13 +277,11 @@ jobs:
           # Zip debug files separately so they don't clutter the Obsidian vault
           zip -r debug_archive.zip corrupted/ fixed/ ../../align_formatting.py
 
-      - name: Commit Generated Files
+      - name: Final Commit & Push
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add conversions/issue-${{ github.event.issue.number }}/
-          git commit -m "Auto-generate aligned markdown for issue #${{ github.event.issue.number }} [skip ci]" || echo "No changes to commit"
-          git push
+          git commit -m "Auto-generate aligned markdown for issue #${{ github.event.issue.number }} [skip ci]" || echo "No final changes to commit"
+          git push origin HEAD:main
 
       - name: Post Direct Download Links
         uses: actions/github-script@v7
@@ -258,4 +299,5 @@ jobs:
               issue_number: issueNum,
               owner: owner,
               repo: repo,
-              body: `✅ **Alignment Complete (Pages 1-15)!**\n\nAll math equations have been converted to standard LaTeX format. The final files have been packaged perfectly for Obsidian.\n\n📄 **Aligned MD Only:** [Download Raw Markdown](${rawMdUrl})\n📚 **Obsidian Vault Folder:** [Download Zip](${obsidianZipUrl})\n📦 **Raw Debug Files:** [Download Zip](${debugZipUrl})`
+              body: `✅ **Alignment Complete!**\n\nThe AI successfully mapped the styling while repairing equations. The final files are packaged for Obsidian.\n\n📄 **Aligned MD Only:** [Download Raw Markdown](${rawMdUrl})\n📚 **Obsidian Vault Folder:** [Download Zip](${obsidianZipUrl})\n📦 **Raw Debug Files:** [Download Zip](${debugZipUrl})`
+            });

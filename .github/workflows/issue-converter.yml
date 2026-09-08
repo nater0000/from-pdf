@@ -47,12 +47,12 @@ jobs:
         run: |
           rm -rf conversions/issue-${{ github.event.issue.number }}
           mkdir -p conversions/issue-${{ github.event.issue.number }}/corrupted
-          marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }}/corrupted --mode fast --disable_ocr --page_range 1-5
+          marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }}/corrupted --mode fast --disable_ocr --page_range 1-15
 
       - name: Convert PDF (Fixed Visual OCR for Clean Spacing)
         run: |
           mkdir -p conversions/issue-${{ github.event.issue.number }}/fixed
-          marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }}/fixed --mode fast --force_ocr --debug --page_range 1-5
+          marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }}/fixed --mode fast --force_ocr --debug --page_range 1-15
 
       - name: Fuzzy Align Formatting via Gemini
         env:
@@ -67,63 +67,84 @@ jobs:
           from google import genai
           from google.genai import errors
 
-          def call_gemini_with_backoff(client, model, prompt, max_retries=6, base_delay=5):
+          def call_gemini_with_backoff(client, model, prompt, base_delay=5, max_delay=60):
               delay = base_delay
-              for attempt in range(1, max_retries + 1):
+              attempt = 1
+              while True:
                   try:
-                      print(f"-> Sending alignment request to {model} (Attempt {attempt}/{max_retries})...")
                       response = client.models.generate_content(
                           model=model,
                           contents=prompt
                       )
                       return response.text
                   except (errors.ServerError, errors.APIError) as e:
-                      if attempt == max_retries:
-                          print(f"❌ Exhausted all {max_retries} attempts. Final Error: {e}")
-                          raise e
-                      
                       jitter = random.uniform(0.5, 2.0)
                       wait_time = delay + jitter
-                      print(f"⚠️ Model temporary error: {e}. Retrying in {wait_time:.1f}s...")
+                      print(f"⚠️ API temporary error: {e}. Retrying in {wait_time:.1f}s...")
                       time.sleep(wait_time)
-                      delay *= 2
+                      delay = min(delay * 2, max_delay)
+                      attempt += 1
 
           def fuzzy_llm_merge(corrupted_path, clean_path, output_path):
-              print(f"-> Loading corrupted formatted text: {corrupted_path}")
               with open(corrupted_path, 'r', encoding='utf-8') as f:
                   corr_text = f.read()
-                  
-              print(f"-> Loading clean OCR text: {clean_path}")
               with open(clean_path, 'r', encoding='utf-8') as f:
                   clean_text = f.read()
                   
               client = genai.Client()
               
-              prompt = f"""You are a precise fuzzy-matching text alignment engine. 
-          You will receive two versions of a document. 
-          1. CORRUPTED TEXT: Contains correct markdown formatting (**bold**, *italics*, etc.) but broken character spacing.
-          2. CLEAN OCR TEXT: Has perfect spelling and natural spacing, but lacks formatting.
+              # Split clean text into chunks (~6000 chars each) breaking at paragraphs
+              paragraphs = clean_text.split('\n\n')
+              batches = []
+              current_batch = ""
+              for p in paragraphs:
+                  if not p.strip(): continue
+                  if len(current_batch) + len(p) > 6000:
+                      batches.append(current_batch)
+                      current_batch = p
+                  else:
+                      current_batch += "\n\n" + p if current_batch else p
+              if current_batch:
+                  batches.append(current_batch)
 
-          Task: Map the markdown formatting tags from the CORRUPTED text onto the CLEAN OCR text. 
-          The CLEAN OCR TEXT is the absolute source of truth for spelling, line breaks, and spaces. 
-          Do not summarize or alter the clean text; only inject the formatting tags into their correct positions.
+              print(f"-> Splitting document into {len(batches)} processing batches...")
+              
+              aligned_chunks = []
+              ratio = len(corr_text) / max(1, len(clean_text))
+              current_clean_idx = 0
+              
+              for i, batch in enumerate(batches):
+                  if not batch.strip(): continue
+                  print(f"-> Processing batch {i+1}/{len(batches)} (Length: {len(batch)} chars)...")
+                  
+                  # Find exact index of the clean text chunk, then map it to the corrupted text
+                  current_clean_idx = clean_text.find(batch, current_clean_idx)
+                  
+                  start_est = max(0, int(current_clean_idx * ratio) - 2500)
+                  end_est = min(len(corr_text), int((current_clean_idx + len(batch)) * ratio) + 2500)
+                  corr_slice = corr_text[start_est:end_est]
+                  
+                  prompt = f"""You are a precise text alignment engine. 
+          Task: Apply markdown formatting (**bold**, *italics*, etc.) to the CLEAN TEXT CHUNK below.
+          Use the CORRUPTED TEXT REFERENCE to identify which words require formatting.
 
-          --- CORRUPTED TEXT ---
-          {corr_text}
+          CRITICAL RULES:
+          1. Your output MUST contain the EXACT words, spelling, line breaks, and spaces of the CLEAN TEXT CHUNK.
+          2. Only inject formatting tags. Do not summarize or alter the baseline text.
 
-          --- CLEAN OCR TEXT ---
-          {clean_text}
+          --- CORRUPTED TEXT REFERENCE ---
+          {corr_slice}
+
+          --- CLEAN TEXT CHUNK ---
+          {batch}
           """
-              
-              aligned_text = call_gemini_with_backoff(
-                  client=client,
-                  model='gemini-3.6-flash',
-                  prompt=prompt
-              )
-              
-              print(f"-> Saving aligned markdown to: {output_path}")
+                  
+                  aligned_text = call_gemini_with_backoff(client, 'gemini-3.6-flash', prompt)
+                  aligned_chunks.append(aligned_text)
+                  
+              print(f"-> Stitching and saving perfectly aligned markdown to: {output_path}")
               with open(output_path, 'w', encoding='utf-8') as f:
-                  f.write(aligned_text)
+                  f.write('\n\n'.join(aligned_chunks))
 
           if __name__ == "__main__":
               issue_num = sys.argv[1]
@@ -133,10 +154,9 @@ jobs:
               
               if corrupted_md.exists() and clean_md.exists():
                   fuzzy_llm_merge(corrupted_md, clean_md, output_md)
-                  print("✅ Dual-input alignment complete.")
+                  print("✅ Multi-batch alignment complete.")
               else:
-                  print("❌ Missing input files. Alignment aborted.")
-                  sys.exit(1)
+                  sys.exit("❌ Missing input files. Alignment aborted.")
           EOF
           
           python align_formatting.py ${{ github.event.issue.number }}
@@ -169,5 +189,5 @@ jobs:
               issue_number: issueNum,
               owner: owner,
               repo: repo,
-              body: `✅ **Alignment Complete (Pages 1-5)!**\n\nThe LLM has fuzzy-matched the formatting to the clean OCR text.\n\n📄 **Aligned MD Only:** [Download Raw Markdown](${rawMdUrl})\n📦 **Debug Archive (All Files):** [Download Zip](${rawZipUrl})`
+              body: `✅ **Alignment Complete (Pages 1-15)!**\n\nThe text was automatically batched to prevent token clipping. All intermediate logs and files are in the zip.\n\n📄 **Aligned MD Only:** [Download Raw Markdown](${rawMdUrl})\n📦 **Debug Archive (All Files):** [Download Zip](${rawZipUrl})`
             });

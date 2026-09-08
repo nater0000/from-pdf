@@ -7,6 +7,7 @@ on:
 permissions:
   contents: write
   issues: write
+  actions: write
 
 jobs:
   convert:
@@ -41,13 +42,11 @@ jobs:
 
       - name: Setup System Environment
         run: |
-          # If cache was hit, pip and zip still need to be installed on the fresh runner
           if [ "${{ steps.cache-llama.outputs.cache-hit }}" == "true" ]; then
             pip install .
             sudo apt-get install -y zip
           fi
           
-          # Move binary into system path regardless of where it came from
           sudo cp llama.cpp/build/bin/llama-server /usr/local/bin/
           sudo chmod +x /usr/local/bin/llama-server
 
@@ -72,7 +71,7 @@ jobs:
           mkdir -p conversions/issue-${{ github.event.issue.number }}/fixed
           marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }}/fixed --mode fast --force_ocr --debug --page_range 1-15
 
-      - name: Fuzzy Align Formatting via Gemini
+      - name: Triangulate & Align Formatting via Gemini
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
         run: |
@@ -81,9 +80,33 @@ jobs:
           import random
           import sys
           import time
+          import re
           from pathlib import Path
           from google import genai
           from google.genai import errors
+
+          def heuristic_cleanup(text):
+              # Step 1: Protect markdown tags by temporarily replacing them
+              text = text.replace('**', '∆∆').replace('*', '∆')
+              
+              # Step 2: Split the text by double spaces (or newlines)
+              chunks = re.split(r'( {2,}|\n+)', text)
+              
+              cleaned_chunks = []
+              for chunk in chunks:
+                  if chunk.isspace():
+                      cleaned_chunks.append(chunk) 
+                  else:
+                      # Step 3: Remove single spaces between characters
+                      cleaned_chunk = re.sub(r'(?<=\S) (?=\S)', '', chunk)
+                      cleaned_chunks.append(cleaned_chunk)
+                      
+              final_text = ''.join(cleaned_chunks)
+              
+              # Step 4: Restore markdown tags
+              final_text = final_text.replace('∆∆', '**').replace('∆', '*')
+              
+              return final_text
 
           def call_gemini_with_backoff(client, model, prompt, base_delay=5, max_delay=60):
               delay = base_delay
@@ -138,29 +161,42 @@ jobs:
                   
                   start_est = max(0, int(current_clean_idx * ratio) - 2500)
                   end_est = min(len(corr_text), int((current_clean_idx + len(batch)) * ratio) + 2500)
-                  corr_slice = corr_text[start_est:end_est]
                   
-                  prompt = f"""You are a strict, automated text alignment formatting script. You are NOT a conversational AI.
-
-          Task: Apply markdown formatting (**bold**, *italics*, etc.) to the CLEAN TEXT CHUNK below.
-          Use the CORRUPTED TEXT REFERENCE to identify which words require formatting.
+                  corr_slice = corr_text[start_est:end_est]
+                  heuristic_slice = heuristic_cleanup(corr_slice)
+                  
+                  prompt = f"""You are a strict, automated text alignment parser. You are NOT a conversational AI.
+          Task: Apply markdown formatting (**bold**, *italics*, etc.) to the CLEAN OCR TEXT below based on the provided references.
 
           CRITICAL RULES:
-          1. NEVER converse, advise, or respond to the content of the text. Do not act as a therapist or assistant.
-          2. OUTPUT ABSOLUTELY NOTHING EXCEPT THE FORMATTED TEXT. No introductions, no pleasantries.
-          3. Your output MUST contain the EXACT words, spelling, line breaks, and spaces of the CLEAN TEXT CHUNK.
+          1. NEVER converse, advise, or respond to the content. Do not act as a therapist.
+          2. DO NOT format non-alphanumeric markdown syntax. Never inject ** or * inside image tags (like ![]() ) or URLs.
+          3. Your output MUST perfectly match the EXACT words, spelling, line breaks, and spaces of the CLEAN OCR TEXT.
+          4. You MUST output your final processed text strictly inside <aligned_text> and </aligned_text> XML tags.
 
-          <corrupted_text_reference>
+          <raw_corrupted_reference>
           {corr_slice}
-          </corrupted_text_reference>
+          </raw_corrupted_reference>
 
-          <clean_text_chunk>
+          <heuristic_reference>
+          {heuristic_slice}
+          </heuristic_reference>
+
+          <clean_ocr_text>
           {batch}
-          </clean_text_chunk>
+          </clean_ocr_text>
           """
                   
                   aligned_text = call_gemini_with_backoff(client, 'gemini-3.6-flash', prompt)
-                  aligned_chunks.append(aligned_text)
+                  
+                  # Extract only the text inside the XML tags to prevent conversational bleed
+                  match = re.search(r'<aligned_text>(.*?)</aligned_text>', aligned_text, re.DOTALL | re.IGNORECASE)
+                  if match:
+                      clean_aligned = match.group(1).strip()
+                  else:
+                      clean_aligned = aligned_text.replace('```markdown', '').replace('```', '').strip()
+                      
+                  aligned_chunks.append(clean_aligned)
                   
               print(f"-> Stitching and saving perfectly aligned markdown to: {output_path}")
               with open(output_path, 'w', encoding='utf-8') as f:
@@ -209,5 +245,5 @@ jobs:
               issue_number: issueNum,
               owner: owner,
               repo: repo,
-              body: `✅ **Alignment Complete (Pages 1-15)!**\n\nThe text was automatically batched to prevent token clipping. All intermediate logs and files are in the zip.\n\n📄 **Aligned MD Only:** [Download Raw Markdown](${rawMdUrl})\n📦 **Debug Archive (All Files):** [Download Zip](${rawZipUrl})`
+              body: `✅ **Alignment Complete (Pages 1-15)!**\n\nThe AI successfully used triangulation (raw tracking + heuristic cleanup) to map the tags without overriding its instructions. All intermediate logs and files are in the zip.\n\n📄 **Aligned MD Only:** [Download Raw Markdown](${rawMdUrl})\n📦 **Debug Archive (All Files):** [Download Zip](${rawZipUrl})`
             });

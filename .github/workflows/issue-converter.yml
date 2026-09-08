@@ -47,7 +47,15 @@ jobs:
       - name: Convert PDF to Markdown
         run: |
           mkdir -p conversions/issue-${{ github.event.issue.number }}
-          marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }} --mode fast --force_ocr --use_llm --page_range 1-5
+      - name: Convert PDF to Markdown
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          mkdir -p conversions/issue-${{ github.event.issue.number }}
+          # --debug prints real-time status logs to the Actions console
+          # --page_range 1-5 ensures a fast validation run
+          marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }} --mode fast --force_ocr --use_llm --debug --page_range 1-5
+
 
 
       - name: Create MD Plus Archive

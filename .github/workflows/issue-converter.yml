@@ -72,7 +72,7 @@ jobs:
               with open(clean_path, 'r', encoding='utf-8') as f:
                   clean_text = f.read()
                   
-              print("-> Sending dual-input alignment prompt to Gemini 2.5 Flash...")
+              print("-> Sending dual-input alignment prompt to Gemini 3.6 Flash...")
               client = genai.Client()
               
               prompt = f"""You are a precise fuzzy-matching text alignment engine. 
@@ -92,7 +92,7 @@ jobs:
               """
               
               response = client.models.generate_content(
-                  model='gemini-2.5-flash',
+                  model='gemini-3.6-flash',
                   contents=prompt
               )
               

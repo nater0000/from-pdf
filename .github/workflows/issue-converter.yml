@@ -113,6 +113,7 @@ jobs:
       - name: Triangulate & Align Formatting via Gemini
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          PYTHONUNBUFFERED: "1"
         run: |
           cat << 'EOF' > align_formatting.py
           import os
@@ -138,7 +139,7 @@ jobs:
               final_text = final_text.replace('∆∆', '**').replace('∆', '*')
               return final_text
 
-          def call_gemini_with_backoff(client, model, prompt, base_delay=5, max_delay=60):
+          def call_gemini_with_backoff(client, model, prompt, base_delay=5, max_delay=60, max_retries=5):
               delay = base_delay
               attempt = 1
               while True:
@@ -149,26 +150,30 @@ jobs:
                       )
                       return response.text
                   except Exception as e:
+                      if attempt >= max_retries:
+                          print(f"\n❌ FATAL: Max retries ({max_retries}) reached. The API is permanently blocking the request (Quota exhausted).", flush=True)
+                          sys.exit(1)
+                          
                       error_str = str(e)
                       
                       # Smart Intercept for 429 RPM Quota Exhaustion
                       if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str:
                           match = re.search(r'retry in ([\d\.]+)s', error_str, re.IGNORECASE)
                           if match:
-                              # Use exactly what the API asks for + a 2-second safety buffer
                               wait_time = float(match.group(1)) + 2.0
-                              print(f"🛑 Rate limit hit (20 RPM). Pausing exactly {wait_time:.1f}s as requested by API...")
+                              print(f"🛑 Rate limit hit (Attempt {attempt}/{max_retries}). Pausing exactly {wait_time:.1f}s as requested by API...", flush=True)
                           else:
                               wait_time = 65.0
-                              print(f"🛑 Rate limit hit. Pausing {wait_time}s...")
+                              print(f"🛑 Rate limit hit (Attempt {attempt}/{max_retries}). Pausing {wait_time}s...", flush=True)
                           
                           time.sleep(wait_time)
-                          continue # Skip exponential delay increment
+                          attempt += 1
+                          continue
 
                       # Fallback for standard 500/503 temporary server errors
                       jitter = random.uniform(0.5, 2.0)
                       wait_time = delay + jitter
-                      print(f"⚠️ API temporary error: {e}. Retrying in {wait_time:.1f}s...")
+                      print(f"⚠️ API temporary error (Attempt {attempt}/{max_retries}): {e}. Retrying in {wait_time:.1f}s...", flush=True)
                       time.sleep(wait_time)
                       delay = min(delay * 2, max_delay)
                       attempt += 1
@@ -194,7 +199,7 @@ jobs:
               if current_batch:
                   batches.append(current_batch)
 
-              print(f"-> Splitting document into {len(batches)} processing batches...")
+              print(f"-> Splitting document into {len(batches)} processing batches...", flush=True)
               
               aligned_chunks = []
               ratio = len(corr_text) / max(1, len(clean_text))
@@ -202,7 +207,7 @@ jobs:
               
               for i, batch in enumerate(batches):
                   if not batch.strip(): continue
-                  print(f"-> Processing batch {i+1}/{len(batches)} (Length: {len(batch)} chars)...")
+                  print(f"-> Processing batch {i+1}/{len(batches)} (Length: {len(batch)} chars)...", flush=True)
                   
                   current_clean_idx = clean_text.find(batch, current_clean_idx)
                   
@@ -245,7 +250,7 @@ jobs:
                       
                   aligned_chunks.append(clean_aligned)
                   
-              print(f"-> Stitching and saving perfectly aligned markdown to: {output_path}")
+              print(f"-> Stitching and saving perfectly aligned markdown to: {output_path}", flush=True)
               with open(output_path, 'w', encoding='utf-8') as f:
                   f.write('\n\n'.join(aligned_chunks))
 
@@ -257,7 +262,7 @@ jobs:
               
               if corrupted_md.exists() and clean_md.exists():
                   fuzzy_llm_merge(corrupted_md, clean_md, output_md)
-                  print("✅ Multi-batch alignment complete.")
+                  print("✅ Multi-batch alignment complete.", flush=True)
               else:
                   sys.exit("❌ Missing input files. Alignment aborted.")
           EOF
@@ -299,5 +304,4 @@ jobs:
               issue_number: issueNum,
               owner: owner,
               repo: repo,
-              body: `✅ **Alignment Complete!**\n\nThe AI successfully mapped the styling while repairing equations. The final files are packaged for Obsidian.\n\n📄 **Aligned MD Only:** [Download Raw Markdown](${rawMdUrl})\n📚 **Obsidian Vault Folder:** [Download Zip](${obsidianZipUrl})\n📦 **Raw Debug Files:** [Download Zip](${debugZipUrl})`
-            });
+              body: `✅ **Alignment Complete!**\n\nAll math equations have been converted to standard LaTeX format. The final files have been packaged perfectly for Obsidian.\n\n📄 **Aligned MD Only:** [Download Raw Markdown](${rawMdUrl})\n📚 **Obsidian Vault Folder:** [Download Zip](${obsidianZipUrl})\n📦 **Raw Debug Files:** [Download Zip](${debugZipUrl})`

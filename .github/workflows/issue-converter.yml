@@ -30,16 +30,21 @@ jobs:
           # Download the specific stable 0.4.0 release to bypass GitHub API limits completely
           wget "https://github.com/ggml-org/llama.cpp/releases/download/b10809/llama-b10809-bin-ubuntu-x64.tar.gz" -O llama.tar.gz
           
-          mkdir -p llama_bin
-          tar -xzf llama.tar.gz -C llama_bin
+          # Create a dedicated directory and extract
+          sudo mkdir -p /opt/llama_bin
+          sudo tar -xzf llama.tar.gz -C /opt/llama_bin --strip-components=1
           
-          # Copy the shared libraries into the system path so the binary can find them
-          find llama_bin -name "*.so" -exec sudo cp {} /usr/local/lib/ \;
-          sudo ldconfig
+          # Ensure the binary is executable
+          sudo chmod +x /opt/llama_bin/llama-server
           
-          # Safely locate the binary regardless of the archive's internal folder structure
-          find llama_bin -name "llama-server" -exec sudo cp {} /usr/local/bin/ \;
-          sudo chmod +x /usr/local/bin/llama-server
+          # Add the directory to the system PATH for this job
+          echo "/opt/llama_bin" >> $GITHUB_PATH
+          
+          # Tell llama.cpp exactly where to find its backends
+          echo "GGML_BACKEND_PATH=/opt/llama_bin" >> $GITHUB_ENV
+          
+          # Also set standard library path just in case
+          echo "LD_LIBRARY_PATH=/opt/llama_bin:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Extract PDF URL and Download
         id: extract
@@ -237,4 +242,3 @@ jobs:
               owner: owner,
               repo: repo,
               body: `✅ **Alignment Complete (Pages 1-15)!**\n\nAll math equations have been converted to standard LaTeX format. The final files have been packaged perfectly for Obsidian.\n\n📄 **Aligned MD Only:** [Download Raw Markdown](${rawMdUrl})\n📚 **Obsidian Vault Folder:** [Download Zip](${obsidianZipUrl})\n📦 **Raw Debug Files:** [Download Zip](${debugZipUrl})`
-            });

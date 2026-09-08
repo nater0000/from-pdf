@@ -23,15 +23,27 @@ jobs:
           cache: 'pip'
 
       - name: Install Dependencies & Download llama.cpp
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           pip install .
-          sudo apt-get install -y zip
+          sudo apt-get install -y zip unzip jq
           
-          # Download the specific stable 0.4.0 release
-          wget "https://github.com/ggml-org/llama.cpp/releases/download/b10809/llama-b10809-bin-ubuntu-x64.tar.gz" -O llama.tar.gz
+          # Dynamically fetch the latest Ubuntu x64 release binary
+          LATEST_URL=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" https://api.github.com/repos/ggml-org/llama.cpp/releases/latest | jq -r '.assets[] | select(.name | test("ubuntu-x64\\.tar\\.gz$")) | .browser_download_url' | head -n 1)
           
+          if [ -z "$LATEST_URL" ] || [ "$LATEST_URL" == "null" ]; then
+            echo "❌ Error: Failed to fetch the latest llama.cpp download link. API limit reached or release format changed."
+            exit 1
+          fi
+          
+          wget "$LATEST_URL" -O llama.tar.gz
           mkdir -p llama_bin
           tar -xzf llama.tar.gz -C llama_bin
+          
+          # Copy the shared libraries into the system path so the binary can find them
+          find llama_bin -name "*.so" -exec sudo cp {} /usr/local/lib/ \;
+          sudo ldconfig
           
           # Safely locate the binary regardless of the archive's internal folder structure
           find llama_bin -name "llama-server" -exec sudo cp {} /usr/local/bin/ \;

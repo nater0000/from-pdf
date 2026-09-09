@@ -240,7 +240,8 @@ jobs:
           </clean_ocr_text>
           """
                   
-                  aligned_text = call_gemini_with_backoff(client, 'gemini-3.6-flash', prompt)
+                  # Successfully upgraded to the high-throughput Lite model
+                  aligned_text = call_gemini_with_backoff(client, 'gemini-3.5-flash-lite', prompt)
                   
                   match = re.search(r'<aligned_text>(.*?)</aligned_text>', aligned_text, re.DOTALL | re.IGNORECASE)
                   if match:

@@ -62,7 +62,6 @@ jobs:
 
       - name: Fetch Latest Checkpoints
         run: |
-          # If a previous run failed but saved a checkpoint, ensure we pull it down
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config pull.rebase false
@@ -70,14 +69,12 @@ jobs:
 
       - name: Parse Issue Commands
         run: |
-          # Check for Force OCR command
           if echo "${{ github.event.issue.body }}" | grep -iq "/force-ocr"; then
             echo "⚠️ /force-ocr command detected. Clearing cached OCR data..."
             rm -rf conversions/issue-${{ github.event.issue.number }}/corrupted
             rm -rf conversions/issue-${{ github.event.issue.number }}/fixed
           fi
           
-          # Check for Page Range command (e.g., /page-range 1-15)
           PAGE_RANGE=$(echo "${{ github.event.issue.body }}" | grep -oP '/page-range\s+\K[\d-]+' | head -n 1)
           if [ -n "$PAGE_RANGE" ]; then
             echo "📄 /page-range command detected: $PAGE_RANGE"
@@ -209,15 +206,22 @@ jobs:
                   corr_slice = corr_text[start_est:end_est]
                   heuristic_slice = heuristic_cleanup(corr_slice)
                   
-                  # ==========================================
-                  # STAGE 1: Formatter
-                  # ==========================================
-                  prompt_formatter = f"""You are a strict, automated text alignment parser.
+                  prompt = f"""You are a strict, automated text alignment parser.
+
           CRITICAL RULES:
-          1. Apply Markdown formatting (**bold**, *italics*) to the CLEAN OCR TEXT.
-          2. MATHEMATICAL FORMULAS: Convert pseudo-LaTeX or broken math into clean standard LaTeX equations ($...$ or $$...$$).
-          3. TABLES: You may use standard Markdown tables (`|---|`) to map steps to timestamps. You are ONLY allowed to use `<br>` tags to handle multiple lines in a table cell. Do NOT use `<b>`, `<u>`, `<li>`, or `<p>`.
-          4. Output your formatted text inside <aligned_text> tags.
+          1. MATHEMATICAL FORMULAS: Convert pseudo-LaTeX or broken math into standard LaTeX equations ($...$ or $$...$$).
+          2. TABLES AND HTML: You may use standard Markdown tables (`|---|`). You are ONLY allowed to use `<br>` tags to handle multiple lines in a table cell. Do NOT use `<b>`, `<u>`, `<li>`, or `<p>`.
+
+          REQUIRED OUTPUT FORMAT:
+          You MUST output your response in two distinct XML blocks to ensure zero text deletion:
+
+          <extracted_orphans>
+          (Look closely at the CLEAN OCR TEXT. Find any footers, contact information, URLs, or trailing paragraphs that might get lost if you restructure the document into a table. Copy them here verbatim FIRST.)
+          </extracted_orphans>
+
+          <aligned_text>
+          (Output your perfectly formatted Markdown document here. Build the tables if needed. Finally, APPEND the exact text from your extracted_orphans block to the very bottom of this document so nothing is lost.)
+          </aligned_text>
 
           <raw_corrupted_reference>
           {corr_slice}
@@ -231,66 +235,18 @@ jobs:
           {batch}
           </clean_ocr_text>
           """
-                  print("   [Stage 1] Generating Formatted Markdown...", flush=True)
-                  formatter_text = call_gemini_with_backoff(client, 'gemini-3.5-flash-lite', prompt_formatter)
-                  match_1 = re.search(r'<aligned_text>(.*?)</aligned_text>', formatter_text, re.DOTALL | re.IGNORECASE)
-                  current_formatted = match_1.group(1).strip() if match_1 else formatter_text.replace('```markdown', '').replace('```', '').strip()
                   
-                  # ==========================================
-                  # STAGE 2 & 3: The Audit Loop
-                  # ==========================================
-                  max_audit_loops = 3
-                  for audit_loop in range(max_audit_loops):
-                      time.sleep(5) # Pacing API
-                      print(f"   [Stage 2] Auditing for missing text (Pass {audit_loop+1}/{max_audit_loops})...", flush=True)
+                  # Upgraded to gemini-2.5-flash for 1,500 RPD and better structural reasoning
+                  aligned_text = call_gemini_with_backoff(client, 'gemini-2.5-flash', prompt)
+                  
+                  match = re.search(r'<aligned_text>(.*?)</aligned_text>', aligned_text, re.DOTALL | re.IGNORECASE)
+                  if match:
+                      clean_aligned = match.group(1).strip()
+                  else:
+                      clean_aligned = aligned_text.replace('```markdown', '').replace('```', '').strip()
                       
-                      prompt_auditor = f"""You are a strict QA Auditor. Your ONLY job is to find text from the ORIGINAL TEXT that was accidentally deleted or left out of the FORMATTED TEXT.
-          Pay special attention to footers, emails, URLs, and paragraphs at the end of the text.
-          
-          TASK:
-          If you find ANY text in the ORIGINAL TEXT that is missing from the FORMATTED TEXT, output EXACTLY the missing text verbatim and nothing else.
-          If EVERYTHING from the ORIGINAL TEXT is present in the FORMATTED TEXT, output EXACTLY the word: COMPLETELY_ACCOUNTED_FOR
-
-          <original_text>
-          {batch}
-          </original_text>
-
-          <formatted_text>
-          {current_formatted}
-          </formatted_text>
-          """
-                      missing_text_response = call_gemini_with_backoff(client, 'gemini-3.5-flash-lite', prompt_auditor).strip()
-                      
-                      if 'COMPLETELY_ACCOUNTED_FOR' in missing_text_response or len(missing_text_response) < 15:
-                          print("   ✅ Auditor confirmed all text is present.", flush=True)
-                          break
-                      else:
-                          print("   ⚠️ Auditor found missing text! Appending...", flush=True)
-                          time.sleep(5)
-                          
-                          prompt_appender = f"""You are a document recovery agent.
-          Take the FORMATTED TEXT below and append the MISSING TEXT to the very bottom as a new Markdown paragraph. 
-          Do NOT alter the FORMATTED TEXT. Keep the existing tables and formatting intact. Just append the missing information to the end.
-          Output the combined result inside <aligned_text> tags.
-
-          <formatted_text>
-          {current_formatted}
-          </formatted_text>
-
-          <missing_text>
-          {missing_text_response}
-          </missing_text>
-          """
-                          appended_response = call_gemini_with_backoff(client, 'gemini-3.5-flash-lite', prompt_appender)
-                          match_3 = re.search(r'<aligned_text>(.*?)</aligned_text>', appended_response, re.DOTALL | re.IGNORECASE)
-                          if match_3:
-                              current_formatted = match_3.group(1).strip()
-                          else:
-                              # Fallback failsafe: literally string-append it if the LLM refuses to use tags
-                              current_formatted = current_formatted + "\n\n" + missing_text_response.replace('```markdown', '').replace('```', '')
-
-                  aligned_chunks.append(current_formatted)
-                  time.sleep(5)
+                  aligned_chunks.append(clean_aligned)
+                  time.sleep(10)
                   
               print(f"-> Stitching and saving perfectly aligned markdown to: {output_path}", flush=True)
               with open(output_path, 'w', encoding='utf-8') as f:
@@ -303,6 +259,7 @@ jobs:
               output_md = Path(f"conversions/issue-{issue_num}/document_aligned.md")
               if corrupted_md.exists() and clean_md.exists():
                   fuzzy_llm_merge(corrupted_md, clean_md, output_md)
+                  print("✅ Multi-batch alignment complete.", flush=True)
               else:
                   sys.exit("❌ Missing input files.")
           EOF

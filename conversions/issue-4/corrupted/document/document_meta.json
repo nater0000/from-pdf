@@ -1,0 +1,265 @@
+{
+  "table_of_contents": [
+    {
+      "title": "Lorem ipsum",
+      "heading_level": null,
+      "page_id": 0,
+      "polygon": [
+        [
+          202.37251108779716,
+          69.65997314453125
+        ],
+        [
+          389.37200927734375,
+          69.65997314453125
+        ],
+        [
+          389.37200927734375,
+          100.90802001953125
+        ],
+        [
+          202.37251108779716,
+          100.90802001953125
+        ]
+      ]
+    },
+    {
+      "title": "Lorem ipsum dolor sit amet, consectetur adipiscing \nelit. Nunc ac faucibus odio.",
+      "heading_level": null,
+      "page_id": 0,
+      "polygon": [
+        [
+          54.04060152375728,
+          144.69396945481202
+        ],
+        [
+          521.416015625,
+          144.69396945481202
+        ],
+        [
+          521.416015625,
+          186.2979736328125
+        ],
+        [
+          54.04060152375728,
+          186.2979736328125
+        ]
+      ]
+    },
+    {
+      "title": "Cras fringilla ipsum magna, in fringilla dui commodo \na.",
+      "heading_level": null,
+      "page_id": 1,
+      "polygon": [
+        [
+          55.0357788816207,
+          302.8251952581499
+        ],
+        [
+          529.2820434570312,
+          302.8251952581499
+        ],
+        [
+          529.2820434570312,
+          346.197998046875
+        ],
+        [
+          55.0357788816207,
+          346.197998046875
+        ]
+      ]
+    },
+    {
+      "title": "Lorem ipsum dolor sit amet, consectetur adipiscing \nelit.",
+      "heading_level": null,
+      "page_id": 2,
+      "polygon": [
+        [
+          71.55351273659194,
+          56.77060444696822
+        ],
+        [
+          521.416015625,
+          56.77060444696822
+        ],
+        [
+          521.416015625,
+          98.09796142578125
+        ],
+        [
+          71.55351273659194,
+          98.09796142578125
+        ]
+      ]
+    },
+    {
+      "title": "Maecenas mauris lectus, lobortis et purus mattis, blandit \ndictum tellus.",
+      "heading_level": null,
+      "page_id": 2,
+      "polygon": [
+        [
+          72.10289390621618,
+          281.9669550337753
+        ],
+        [
+          510.9281005859375,
+          281.9669550337753
+        ],
+        [
+          510.9281005859375,
+          320.3759765625
+        ],
+        [
+          72.10289390621618,
+          320.3759765625
+        ]
+      ]
+    },
+    {
+      "title": "In eleifend velit vitae libero sollicitudin euismod.",
+      "heading_level": null,
+      "page_id": 2,
+      "polygon": [
+        [
+          71.7108512225019,
+          519.2849506979421
+        ],
+        [
+          446.97613525390625,
+          519.2849506979421
+        ],
+        [
+          446.97613525390625,
+          538.9760131835938
+        ],
+        [
+          71.7108512225019,
+          538.9760131835938
+        ]
+      ]
+    }
+  ],
+  "page_stats": [
+    {
+      "page_id": 0,
+      "text_extraction_method": "pdftext",
+      "block_counts": [
+        [
+          "Span",
+          78
+        ],
+        [
+          "Line",
+          31
+        ],
+        [
+          "Text",
+          4
+        ],
+        [
+          "SectionHeader",
+          2
+        ],
+        [
+          "ListGroup",
+          1
+        ],
+        [
+          "Figure",
+          1
+        ]
+      ],
+      "block_metadata": {
+        "llm_request_count": 0,
+        "llm_error_count": 0,
+        "llm_tokens_used": 0,
+        "previous_text": "",
+        "previous_type": "",
+        "previous_order": 0
+      }
+    },
+    {
+      "page_id": 1,
+      "text_extraction_method": "pdftext",
+      "block_counts": [
+        [
+          "Span",
+          77
+        ],
+        [
+          "Line",
+          30
+        ],
+        [
+          "Text",
+          3
+        ],
+        [
+          "SectionHeader",
+          1
+        ],
+        [
+          "Table",
+          1
+        ]
+      ],
+      "block_metadata": {
+        "llm_request_count": 0,
+        "llm_error_count": 0,
+        "llm_tokens_used": 0,
+        "previous_text": "",
+        "previous_type": "",
+        "previous_order": 0
+      }
+    },
+    {
+      "page_id": 2,
+      "text_extraction_method": "pdftext",
+      "block_counts": [
+        [
+          "Span",
+          75
+        ],
+        [
+          "Line",
+          38
+        ],
+        [
+          "Text",
+          5
+        ],
+        [
+          "SectionHeader",
+          3
+        ]
+      ],
+      "block_metadata": {
+        "llm_request_count": 0,
+        "llm_error_count": 0,
+        "llm_tokens_used": 0,
+        "previous_text": "",
+        "previous_type": "",
+        "previous_order": 0
+      }
+    },
+    {
+      "page_id": 3,
+      "text_extraction_method": "pdftext",
+      "block_counts": [
+        [
+          "Picture",
+          1
+        ]
+      ],
+      "block_metadata": {
+        "llm_request_count": 0,
+        "llm_error_count": 0,
+        "llm_tokens_used": 0,
+        "previous_text": "",
+        "previous_type": "",
+        "previous_order": 0
+      }
+    }
+  ],
+  "debug_data_path": "debug_data/document"
+}

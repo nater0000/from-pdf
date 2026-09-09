@@ -1,0 +1,149 @@
+{
+  "table_of_contents": [
+    {
+      "title": "Lorem ipsum",
+      "heading_level": null,
+      "page_id": 0,
+      "polygon": [
+        [
+          202.895,
+          69.886
+        ],
+        [
+          381.99,
+          69.886
+        ],
+        [
+          381.99,
+          99.35599999999998
+        ],
+        [
+          202.895,
+          99.35599999999998
+        ]
+      ]
+    },
+    {
+      "title": "In eleifend velit vitae libero sollicitudin euismod.",
+      "heading_level": null,
+      "page_id": 2,
+      "polygon": [
+        [
+          73.185,
+          519.5139999999999
+        ],
+        [
+          442.08500000000004,
+          519.5139999999999
+        ],
+        [
+          442.08500000000004,
+          538.038
+        ],
+        [
+          73.185,
+          538.038
+        ]
+      ]
+    }
+  ],
+  "page_stats": [
+    {
+      "page_id": 0,
+      "text_extraction_method": "surya",
+      "block_counts": [
+        [
+          "Text",
+          6
+        ],
+        [
+          "SectionHeader",
+          3
+        ],
+        [
+          "ListGroup",
+          2
+        ],
+        [
+          "Figure",
+          2
+        ]
+      ],
+      "block_metadata": {
+        "llm_request_count": 0,
+        "llm_error_count": 0,
+        "llm_tokens_used": 0,
+        "previous_text": "",
+        "previous_type": "",
+        "previous_order": 0
+      }
+    },
+    {
+      "page_id": 1,
+      "text_extraction_method": "surya",
+      "block_counts": [
+        [
+          "Text",
+          4
+        ],
+        [
+          "SectionHeader",
+          1
+        ],
+        [
+          "Table",
+          1
+        ]
+      ],
+      "block_metadata": {
+        "llm_request_count": 0,
+        "llm_error_count": 0,
+        "llm_tokens_used": 0,
+        "previous_text": "",
+        "previous_type": "",
+        "previous_order": 0
+      }
+    },
+    {
+      "page_id": 2,
+      "text_extraction_method": "surya",
+      "block_counts": [
+        [
+          "Text",
+          9
+        ],
+        [
+          "SectionHeader",
+          4
+        ]
+      ],
+      "block_metadata": {
+        "llm_request_count": 0,
+        "llm_error_count": 0,
+        "llm_tokens_used": 0,
+        "previous_text": "",
+        "previous_type": "",
+        "previous_order": 0
+      }
+    },
+    {
+      "page_id": 3,
+      "text_extraction_method": "surya",
+      "block_counts": [
+        [
+          "Picture",
+          2
+        ]
+      ],
+      "block_metadata": {
+        "llm_request_count": 0,
+        "llm_error_count": 0,
+        "llm_tokens_used": 0,
+        "previous_text": "",
+        "previous_type": "",
+        "previous_order": 0
+      }
+    }
+  ],
+  "debug_data_path": "conversions/issue-4/fixed/document"
+}

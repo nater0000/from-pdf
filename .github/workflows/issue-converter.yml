@@ -240,8 +240,7 @@ jobs:
           </clean_ocr_text>
           """
                   
-                  # Corrected Model Call
-                  aligned_text = call_gemini_with_backoff(client, 'gemini-1.5-flash', prompt)
+                  aligned_text = call_gemini_with_backoff(client, 'gemini-3.6-flash', prompt)
                   
                   match = re.search(r'<aligned_text>(.*?)</aligned_text>', aligned_text, re.DOTALL | re.IGNORECASE)
                   if match:

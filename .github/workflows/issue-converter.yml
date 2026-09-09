@@ -233,7 +233,8 @@ jobs:
              - MATHEMATICAL FORMULAS: Convert pseudo-LaTeX or broken math into clean, valid, standard LaTeX equations ($...$ or $$...$$).
           4. You MUST output your final processed text strictly inside <aligned_text> and </aligned_text> XML tags.
           5. TABLES AND HTML: You may use standard Markdown tables (`|---|`) to reconstruct visual column layouts. To handle multiple lines inside a single table cell, you are ONLY allowed to use `<br>` tags. You are STRICTLY FORBIDDEN from using any other HTML tags (`<ul>`, `<li>`, `<p>`, `<b>`, etc.). For bullet points inside a table, format them as `- Item 1<br>- Item 2`.
-          6. THE "ORPHAN TEXT" RULE: When reconstructing tables, you might pull timestamps or values from the very bottom of the document. When you do this, you MUST NOT skip or delete the text that was sitting right above them (like footers, contact information, or URLs). Always append any unused text from the `clean_ocr_text` to the very end of your output as standard paragraphs. 100% of the input text must be present.
+          6. THE "ORPHAN TEXT" RULE (CRITICAL): When you build tables, you tend to drop the text that immediately precedes the isolated timestamps at the bottom of the raw text. You MUST actively look for footers, contact information, URLs, or summary paragraphs at the end of the `clean_ocr_text` and print them as standard paragraphs AT THE VERY END of your output, outside and below the table.
+          7. ZERO DELETION POLICY: 100% of the words in the `clean_ocr_text` MUST appear in your output. Do not summarize. Do not truncate. Do not stop generating until every paragraph, link, and email address has been included in your final response.
 
           <raw_corrupted_reference>
           {corr_slice}

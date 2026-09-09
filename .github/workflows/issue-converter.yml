@@ -310,3 +310,4 @@ jobs:
               owner: owner,
               repo: repo,
               body: `✅ **Alignment Complete!**\n\nAll math equations have been converted to standard LaTeX format. The final files have been packaged perfectly for Obsidian.\n\n📄 **Aligned MD Only:** [Download Raw Markdown](${rawMdUrl})\n📚 **Obsidian Vault Folder:** [Download Zip](${obsidianZipUrl})\n📦 **Raw Debug Files:** [Download Zip](${debugZipUrl})`
+            });

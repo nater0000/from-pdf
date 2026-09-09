@@ -210,16 +210,14 @@ jobs:
                   heuristic_slice = heuristic_cleanup(corr_slice)
                   
                   # ==========================================
-                  # PASS 1: The Linear Baseline
+                  # STAGE 1: Formatter
                   # ==========================================
-                  prompt_pass1 = f"""You are a strict, highly accurate Markdown formatter.
-          TASK: Apply formatting (**bold**, *italics*) to the CLEAN OCR TEXT based on the visual hints in the REFERENCES.
-
+                  prompt_formatter = f"""You are a strict, automated text alignment parser.
           CRITICAL RULES:
-          1. NO TABLES ALLOWED: You are strictly forbidden from creating Markdown tables (`|---|`). Format everything linearly using normal paragraphs, headings (`###`), and bullet points (`-`).
-          2. ZERO DELETION: You must include 100% of the words from the CLEAN OCR TEXT. Do not drop footers, contact information, timestamps, or partial sentences. Process the text exactly from top to bottom.
-          3. MATHEMATICS: Convert pseudo-LaTeX or broken math into standard LaTeX equations ($...$ or $$...$$).
-          4. Output your formatted text inside <linear_markdown> tags.
+          1. Apply Markdown formatting (**bold**, *italics*) to the CLEAN OCR TEXT.
+          2. MATHEMATICAL FORMULAS: Convert pseudo-LaTeX or broken math into clean standard LaTeX equations ($...$ or $$...$$).
+          3. TABLES: You may use standard Markdown tables (`|---|`) to map steps to timestamps. You are ONLY allowed to use `<br>` tags to handle multiple lines in a table cell. Do NOT use `<b>`, `<u>`, `<li>`, or `<p>`.
+          4. Output your formatted text inside <aligned_text> tags.
 
           <raw_corrupted_reference>
           {corr_slice}
@@ -233,38 +231,68 @@ jobs:
           {batch}
           </clean_ocr_text>
           """
-                  print("   [Pass 1] Generating linear markdown (100% text retention)...", flush=True)
-                  pass1_text = call_gemini_with_backoff(client, 'gemini-3.5-flash-lite', prompt_pass1)
-                  
-                  match_1 = re.search(r'<linear_markdown>(.*?)</linear_markdown>', pass1_text, re.DOTALL | re.IGNORECASE)
-                  linear_md = match_1.group(1).strip() if match_1 else pass1_text.replace('```markdown', '').replace('```', '').strip()
+                  print("   [Stage 1] Generating Formatted Markdown...", flush=True)
+                  formatter_text = call_gemini_with_backoff(client, 'gemini-3.5-flash-lite', prompt_formatter)
+                  match_1 = re.search(r'<aligned_text>(.*?)</aligned_text>', formatter_text, re.DOTALL | re.IGNORECASE)
+                  current_formatted = match_1.group(1).strip() if match_1 else formatter_text.replace('```markdown', '').replace('```', '').strip()
                   
                   # ==========================================
-                  # PASS 2: The Table Upgrader
+                  # STAGE 2 & 3: The Audit Loop
                   # ==========================================
-                  prompt_pass2 = f"""You are a layout structural editor.
-          TASK: Take the LINEAR MARKDOWN below and upgrade specific lists/schedules into Markdown tables IF they logically belong in a two-column format (like steps mapping to timestamps).
+                  max_audit_loops = 3
+                  for audit_loop in range(max_audit_loops):
+                      time.sleep(5) # Pacing API
+                      print(f"   [Stage 2] Auditing for missing text (Pass {audit_loop+1}/{max_audit_loops})...", flush=True)
+                      
+                      prompt_auditor = f"""You are a strict QA Auditor. Your ONLY job is to find text from the ORIGINAL TEXT that was accidentally deleted or left out of the FORMATTED TEXT.
+          Pay special attention to footers, emails, URLs, and paragraphs at the end of the text.
+          
+          TASK:
+          If you find ANY text in the ORIGINAL TEXT that is missing from the FORMATTED TEXT, output EXACTLY the missing text verbatim and nothing else.
+          If EVERYTHING from the ORIGINAL TEXT is present in the FORMATTED TEXT, output EXACTLY the word: COMPLETELY_ACCOUNTED_FOR
 
-          CRITICAL RULES:
-          1. ONLY modify the specific lines that are being turned into a table.
-          2. Use standard Markdown tables (`|---|`) and use `<br>` for line breaks inside cells.
-          3. STRICT TEXT RETENTION: You must perfectly preserve all text BEFORE and AFTER the table. Do not delete or move intros, paragraphs, footers, or contact info. If you break a sentence to insert a table, you have failed.
-          4. If the text does not contain tabular data, output the exact same text without changes.
-          5. Output your final text inside <final_markdown> tags.
+          <original_text>
+          {batch}
+          </original_text>
 
-          <linear_markdown>
-          {linear_md}
-          </linear_markdown>
+          <formatted_text>
+          {current_formatted}
+          </formatted_text>
           """
-                  print("   [Pass 2] Upgrading layout to tables where appropriate...", flush=True)
-                  pass2_text = call_gemini_with_backoff(client, 'gemini-3.5-flash-lite', prompt_pass2)
-                  
-                  match_2 = re.search(r'<final_markdown>(.*?)</final_markdown>', pass2_text, re.DOTALL | re.IGNORECASE)
-                  final_aligned = match_2.group(1).strip() if match_2 else pass2_text.replace('```markdown', '').replace('```', '').strip()
+                      missing_text_response = call_gemini_with_backoff(client, 'gemini-3.5-flash-lite', prompt_auditor).strip()
+                      
+                      if 'COMPLETELY_ACCOUNTED_FOR' in missing_text_response or len(missing_text_response) < 15:
+                          print("   ✅ Auditor confirmed all text is present.", flush=True)
+                          break
+                      else:
+                          print("   ⚠️ Auditor found missing text! Appending...", flush=True)
+                          time.sleep(5)
+                          
+                          prompt_appender = f"""You are a document recovery agent.
+          Take the FORMATTED TEXT below and append the MISSING TEXT to the very bottom as a new Markdown paragraph. 
+          Do NOT alter the FORMATTED TEXT. Keep the existing tables and formatting intact. Just append the missing information to the end.
+          Output the combined result inside <aligned_text> tags.
 
-                  aligned_chunks.append(final_aligned)
-                  time.sleep(10)
+          <formatted_text>
+          {current_formatted}
+          </formatted_text>
+
+          <missing_text>
+          {missing_text_response}
+          </missing_text>
+          """
+                          appended_response = call_gemini_with_backoff(client, 'gemini-3.5-flash-lite', prompt_appender)
+                          match_3 = re.search(r'<aligned_text>(.*?)</aligned_text>', appended_response, re.DOTALL | re.IGNORECASE)
+                          if match_3:
+                              current_formatted = match_3.group(1).strip()
+                          else:
+                              # Fallback failsafe: literally string-append it if the LLM refuses to use tags
+                              current_formatted = current_formatted + "\n\n" + missing_text_response.replace('```markdown', '').replace('```', '')
+
+                  aligned_chunks.append(current_formatted)
+                  time.sleep(5)
                   
+              print(f"-> Stitching and saving perfectly aligned markdown to: {output_path}", flush=True)
               with open(output_path, 'w', encoding='utf-8') as f:
                   f.write('\n\n'.join(aligned_chunks))
 

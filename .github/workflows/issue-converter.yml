@@ -85,6 +85,8 @@ jobs:
           fi
 
       - name: Convert PDF (Corrupted Text Layer for Styling)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           if [ -f "conversions/issue-${{ github.event.issue.number }}/corrupted/document/document.md" ]; then
             echo "✅ Corrupted text layer already extracted. Skipping."
@@ -95,6 +97,8 @@ jobs:
           fi
 
       - name: Convert PDF (Fixed Visual OCR for Clean Spacing)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           if [ -f "conversions/issue-${{ github.event.issue.number }}/fixed/document/document.md" ]; then
             echo "✅ Fixed OCR layer already extracted. Skipping."

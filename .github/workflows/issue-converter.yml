@@ -63,7 +63,6 @@ jobs:
       - name: Fetch Latest Checkpoints
         run: |
           # If a previous run failed but saved a checkpoint, ensure we pull it down
-          # before evaluating the skip logic (vital for "Re-run failed jobs" clicks)
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config pull.rebase false
@@ -131,7 +130,6 @@ jobs:
           import re
           from pathlib import Path
           from google import genai
-          from google.genai import errors
 
           def heuristic_cleanup(text):
               text = text.replace('**', '∆∆').replace('*', '∆')
@@ -159,27 +157,20 @@ jobs:
                       return response.text
                   except Exception as e:
                       if attempt >= max_retries:
-                          print(f"\n❌ FATAL: Max retries ({max_retries}) reached. The API is permanently blocking the request (Quota exhausted).", flush=True)
+                          print(f"\n❌ FATAL: Max retries ({max_retries}) reached.", flush=True)
                           sys.exit(1)
-                          
                       error_str = str(e)
-                      
                       if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str:
                           match = re.search(r'retry in ([\d\.]+)s', error_str, re.IGNORECASE)
-                          if match:
-                              wait_time = float(match.group(1)) + 2.0
-                              print(f"🛑 Rate limit hit (Attempt {attempt}/{max_retries}). Pausing exactly {wait_time:.1f}s as requested by API...", flush=True)
-                          else:
-                              wait_time = 65.0
-                              print(f"🛑 Rate limit hit (Attempt {attempt}/{max_retries}). Pausing {wait_time}s...", flush=True)
-                          
+                          wait_time = float(match.group(1)) + 2.0 if match else 65.0
+                          print(f"🛑 Rate limit hit. Pausing {wait_time}s...", flush=True)
                           time.sleep(wait_time)
                           attempt += 1
                           continue
 
                       jitter = random.uniform(0.5, 2.0)
                       wait_time = delay + jitter
-                      print(f"⚠️ API temporary error (Attempt {attempt}/{max_retries}): {e}. Retrying in {wait_time:.1f}s...", flush=True)
+                      print(f"⚠️ API temporary error: {e}. Retrying in {wait_time:.1f}s...", flush=True)
                       time.sleep(wait_time)
                       delay = min(delay * 2, max_delay)
                       attempt += 1
@@ -191,7 +182,6 @@ jobs:
                   clean_text = f.read()
                   
               client = genai.Client()
-              
               paragraphs = clean_text.split('\n\n')
               batches = []
               current_batch = ""
@@ -205,8 +195,6 @@ jobs:
               if current_batch:
                   batches.append(current_batch)
 
-              print(f"-> Splitting document into {len(batches)} processing batches...", flush=True)
-              
               aligned_chunks = []
               ratio = len(corr_text) / max(1, len(clean_text))
               current_clean_idx = 0
@@ -216,25 +204,20 @@ jobs:
                   print(f"-> Processing batch {i+1}/{len(batches)} (Length: {len(batch)} chars)...", flush=True)
                   
                   current_clean_idx = clean_text.find(batch, current_clean_idx)
-                  
                   start_est = max(0, int(current_clean_idx * ratio) - 2500)
                   end_est = min(len(corr_text), int((current_clean_idx + len(batch)) * ratio) + 2500)
-                  
                   corr_slice = corr_text[start_est:end_est]
                   heuristic_slice = heuristic_cleanup(corr_slice)
                   
-                  prompt = f"""You are a strict, automated text alignment parser.
-
+                  # ==========================================
+                  # PASS 1: The Formatter
+                  # ==========================================
+                  prompt_pass1 = f"""You are a strict, automated text alignment parser.
           CRITICAL RULES:
-          1. NEVER converse, advise, or respond to the content.
-          2. MATHEMATICAL FORMULAS: Convert pseudo-LaTeX or broken math into clean LaTeX equations ($...$ or $$...$$).
+          1. NEVER converse or advise.
+          2. MATHEMATICAL FORMULAS: Convert broken math into standard LaTeX equations ($...$ or $$...$$).
           3. TABLES AND HTML: You may use standard Markdown tables (`|---|`). You are ONLY allowed to use `<br>` tags to handle multiple lines in a table. You are STRICTLY FORBIDDEN from using `<b>`, `<u>`, `<i>`, `<ul>`, `<li>`, or `<p>`. Use pure Markdown formatting (`**bold**`, `*italics*`).
-          4. ZERO DELETION POLICY: 100% of the words in the `clean_ocr_text` MUST appear in your output. Do not summarize or truncate.
-
-          REQUIRED OUTPUT FORMAT:
-          You must process the text in two distinct steps to ensure no text is lost:
-          Step 1: Open a <scratchpad> XML block. Look closely at the `clean_ocr_text`. Identify any "Orphan Text" (e.g., contact info, URLs, footers, or paragraphs) that appears before or between the stray timestamps. Copy that orphan text into the scratchpad so you don't forget it.
-          Step 2: Open an <aligned_text> XML block. Output your final, perfectly formatted Markdown. Build the table using the timestamps, and then ALWAYS append the Orphan Text from your scratchpad at the very bottom of the document.
+          4. You MUST output your processed text strictly inside <aligned_text> and </aligned_text> XML tags.
 
           <raw_corrupted_reference>
           {corr_slice}
@@ -248,21 +231,44 @@ jobs:
           {batch}
           </clean_ocr_text>
           """
+                  print("   [Pass 1] Generating Markdown formatting and tables...", flush=True)
+                  pass1_text = call_gemini_with_backoff(client, 'gemini-3.5-flash-lite', prompt_pass1)
                   
-                  aligned_text = call_gemini_with_backoff(client, 'gemini-3.5-flash-lite', prompt)
+                  match_1 = re.search(r'<aligned_text>(.*?)</aligned_text>', pass1_text, re.DOTALL | re.IGNORECASE)
+                  clean_pass1 = match_1.group(1).strip() if match_1 else pass1_text.replace('```markdown', '').replace('```', '').strip()
                   
-                  match = re.search(r'<aligned_text>(.*?)</aligned_text>', aligned_text, re.DOTALL | re.IGNORECASE)
-                  if match:
-                      clean_aligned = match.group(1).strip()
-                  else:
-                      clean_aligned = aligned_text.replace('```markdown', '').replace('```', '').strip()
-                      
-                  aligned_chunks.append(clean_aligned)
+                  # ==========================================
+                  # PASS 2: The Sweeper
+                  # ==========================================
+                  prompt_pass2 = f"""You are an exact and literal proofreader. Your ONLY job is to prevent data loss.
+
+          Below is the ORIGINAL TEXT, and a FORMATTED TEXT version of it.
+          Sometimes the formatting process accidentally deletes sentences, footers, contact information, or orphaned paragraphs from the original text.
+
+          TASK:
+          1. Compare the ORIGINAL TEXT to the FORMATTED TEXT.
+          2. Find ANY valid text (like footers or emails) present in the ORIGINAL TEXT that is missing from the FORMATTED TEXT.
+          3. Output the exact FORMATTED TEXT as it is, but simply APPEND the missing text to the very bottom as a new paragraph.
+          4. DO NOT change the formatting of the existing FORMATTED TEXT. Just append what was lost.
+          5. You MUST output your final text strictly inside <final_text> and </final_text> XML tags.
+
+          <original_text>
+          {batch}
+          </original_text>
+
+          <formatted_text>
+          {clean_pass1}
+          </formatted_text>
+          """
+                  print("   [Pass 2] Sweeping for deleted footers or missing text...", flush=True)
+                  pass2_text = call_gemini_with_backoff(client, 'gemini-3.5-flash-lite', prompt_pass2)
                   
-                  print("✅ Batch processed successfully. Pacing API...", flush=True)
+                  match_2 = re.search(r'<final_text>(.*?)</final_text>', pass2_text, re.DOTALL | re.IGNORECASE)
+                  final_aligned = match_2.group(1).strip() if match_2 else pass2_text.replace('```markdown', '').replace('```', '').strip()
+
+                  aligned_chunks.append(final_aligned)
                   time.sleep(10)
                   
-              print(f"-> Stitching and saving perfectly aligned markdown to: {output_path}", flush=True)
               with open(output_path, 'w', encoding='utf-8') as f:
                   f.write('\n\n'.join(aligned_chunks))
 
@@ -271,12 +277,10 @@ jobs:
               corrupted_md = Path(f"conversions/issue-{issue_num}/corrupted/document/document.md")
               clean_md = Path(f"conversions/issue-{issue_num}/fixed/document/document.md")
               output_md = Path(f"conversions/issue-{issue_num}/document_aligned.md")
-              
               if corrupted_md.exists() and clean_md.exists():
                   fuzzy_llm_merge(corrupted_md, clean_md, output_md)
-                  print("✅ Multi-batch alignment complete.", flush=True)
               else:
-                  sys.exit("❌ Missing input files. Alignment aborted.")
+                  sys.exit("❌ Missing input files.")
           EOF
           
           python align_formatting.py ${{ github.event.issue.number }}
@@ -286,12 +290,8 @@ jobs:
           cd conversions/issue-${{ github.event.issue.number }}
           mkdir -p obsidian_ready
           cp document_aligned.md obsidian_ready/
-          
-          # Flatten extracted images into the same folder for standard Markdown linking
           find fixed/document/ -type f \( -iname \*.jpg -o -iname \*.jpeg -o -iname \*.png \) -exec cp {} obsidian_ready/ \;
-          
           zip -r obsidian_ready.zip obsidian_ready/
-          # Zip debug files separately so they don't clutter the Obsidian vault
           zip -r debug_archive.zip corrupted/ fixed/ ../../align_formatting.py
 
       - name: Final Commit & Push

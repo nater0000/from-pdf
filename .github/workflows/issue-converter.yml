@@ -230,10 +230,10 @@ jobs:
           1. NEVER converse, advise, or respond to the content. Do not act as a therapist.
           2. DO NOT format non-alphanumeric markdown syntax. Never inject ** or * inside image tags (like ![]() ) or URLs.
           3. Your output MUST perfectly match the EXACT words, spelling, line breaks, and spaces of the CLEAN OCR TEXT, with ONE EXCEPTION:
-             - MATHEMATICAL FORMULAS: Convert pseudo-LaTeX or broken math into clean, valid, standard LaTeX equations ($...$ for inline, $$...$$ for block display).
+             - MATHEMATICAL FORMULAS: Convert pseudo-LaTeX or broken math into clean, valid, standard LaTeX equations ($...$ or $$...$$).
           4. You MUST output your final processed text strictly inside <aligned_text> and </aligned_text> XML tags.
-          5. TABLES ARE ALLOWED: If the original document implies a two-column layout (like steps and times), you may reconstruct it using a Markdown table. You may use `<br>` tags strictly for line breaks inside table cells.
-          6. THE "ORPHAN TEXT" SWEEPER RULE (DO NOT OMIT TEXT): When you pull scattered text (like timestamps) from the bottom of the document to build a table, you MUST NOT forget the text that was sitting right above them (e.g., contact info, URLs, footers). You must double-check your work and print all remaining/orphan text as normal paragraphs *below* your table. 100% of the `clean_ocr_text` must be represented in your output.
+          5. TABLES AND HTML: You may use standard Markdown tables (`|---|`) to reconstruct visual column layouts. To handle multiple lines inside a single table cell, you are ONLY allowed to use `<br>` tags. You are STRICTLY FORBIDDEN from using any other HTML tags (`<ul>`, `<li>`, `<p>`, `<b>`, etc.). For bullet points inside a table, format them as `- Item 1<br>- Item 2`.
+          6. THE "ORPHAN TEXT" RULE: When reconstructing tables, you might pull timestamps or values from the very bottom of the document. When you do this, you MUST NOT skip or delete the text that was sitting right above them (like footers, contact information, or URLs). Always append any unused text from the `clean_ocr_text` to the very end of your output as standard paragraphs. 100% of the input text must be present.
 
           <raw_corrupted_reference>
           {corr_slice}

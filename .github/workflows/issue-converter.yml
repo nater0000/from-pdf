@@ -168,7 +168,6 @@ jobs:
                       if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str:
                           match = re.search(r'retry in ([\d\.]+)s', error_str, re.IGNORECASE)
                           if match:
-                              # Use exactly what the API asks for + a 2-second safety buffer
                               wait_time = float(match.group(1)) + 2.0
                               print(f"🛑 Rate limit hit (Attempt {attempt}/{max_retries}). Pausing exactly {wait_time:.1f}s as requested by API...", flush=True)
                           else:
@@ -235,7 +234,8 @@ jobs:
           3. Your output MUST perfectly match the EXACT words, spelling, line breaks, and spaces of the CLEAN OCR TEXT, with ONE EXCEPTION:
              - MATHEMATICAL FORMULAS: When you encounter pseudo-LaTeX, ASCII math, or broken equation typography (e.g., `v[...]` or `\vartheta[...]` for square root, `\wedge^2` for squared, `y = 1/v[...]` for the Lorentz factor, `1_p` for `l_p`, `\Sigma_i` for summation, missing brackets, etc.), convert them into clean, valid, standard LaTeX equations ($...$ for inline, $$...$$ for block display).
           4. You MUST output your final processed text strictly inside <aligned_text> and </aligned_text> XML tags.
-          5. NEVER use HTML tags (like `<ul>`, `<li>`, `<table>`, `<p>`, etc.). If you encounter a complex table or multi-column layout that requires multi-line cells, flatten it into standard markdown headings and bulleted lists instead of forcing it into a markdown table.
+          5. NEVER use HTML tags (including `<br>`). If you encounter a complex table or multi-column layout, absolutely DO NOT use Markdown tables (`|---|`). Flatten it entirely into standard markdown headings (`###`) and bulleted lists.
+          6. DO NOT OMIT ANY TEXT. You must include every single sentence from the `clean_ocr_text`, including footers, contact information, or stray lines at the end of the document. Do not truncate the end of the text.
 
           <raw_corrupted_reference>
           {corr_slice}
@@ -250,7 +250,6 @@ jobs:
           </clean_ocr_text>
           """
                   
-                  # Successfully upgraded to the high-throughput Lite model
                   aligned_text = call_gemini_with_backoff(client, 'gemini-3.5-flash-lite', prompt)
                   
                   match = re.search(r'<aligned_text>(.*?)</aligned_text>', aligned_text, re.DOTALL | re.IGNORECASE)
@@ -261,7 +260,6 @@ jobs:
                       
                   aligned_chunks.append(clean_aligned)
                   
-                  # Pacing the API to naturally smooth out Token-Per-Minute quotas
                   print("✅ Batch processed successfully. Pacing API...", flush=True)
                   time.sleep(10)
                   

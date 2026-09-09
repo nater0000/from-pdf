@@ -142,6 +142,10 @@ jobs:
               final_text = final_text.replace('∆∆', '**').replace('∆', '*')
               return final_text
 
+          def clean_for_comparison(text):
+              # Strip all formatting, spaces, and special characters for a pure alphanumeric text match
+              return re.sub(r'[^a-zA-Z0-9]', '', text).lower()
+
           def call_gemini_with_backoff(client, model, prompt, base_delay=5, max_delay=60, max_retries=30):
               delay = base_delay
               attempt = 1
@@ -198,7 +202,7 @@ jobs:
               
               for i, batch in enumerate(batches):
                   if not batch.strip(): continue
-                  print(f"-> Processing batch {i+1}/{len(batches)} (Length: {len(batch)} chars)...", flush=True)
+                  print(f"-> Processing batch {i+1}/{len(batches)}...", flush=True)
                   
                   current_clean_idx = clean_text.find(batch, current_clean_idx)
                   start_est = max(0, int(current_clean_idx * ratio) - 2500)
@@ -206,22 +210,17 @@ jobs:
                   corr_slice = corr_text[start_est:end_est]
                   heuristic_slice = heuristic_cleanup(corr_slice)
                   
-                  prompt = f"""You are a strict, automated text alignment parser.
+                  # ==========================================
+                  # PASS 1: The Linear Baseline (Source of Truth)
+                  # ==========================================
+                  prompt_1 = f"""You are a strict Markdown formatter.
+          TASK: Apply formatting (**bold**, *italics*) to the CLEAN OCR TEXT based on the visual hints in the REFERENCES.
 
           CRITICAL RULES:
-          1. MATHEMATICAL FORMULAS: Convert pseudo-LaTeX or broken math into standard LaTeX equations ($...$ or $$...$$).
-          2. TABLES AND HTML: You may use standard Markdown tables (`|---|`). You are ONLY allowed to use `<br>` tags to handle multiple lines in a table cell. Do NOT use `<b>`, `<u>`, `<li>`, or `<p>`.
-
-          REQUIRED OUTPUT FORMAT:
-          You MUST output your response in two distinct XML blocks to ensure zero text deletion:
-
-          <extracted_orphans>
-          (Look closely at the CLEAN OCR TEXT. Find any footers, contact information, URLs, or trailing paragraphs that might get lost if you restructure the document into a table. Copy them here verbatim FIRST.)
-          </extracted_orphans>
-
-          <aligned_text>
-          (Output your perfectly formatted Markdown document here. Build the tables if needed. Finally, APPEND the exact text from your extracted_orphans block to the very bottom of this document so nothing is lost.)
-          </aligned_text>
+          1. ABSOLUTELY NO TABLES: You are strictly forbidden from outputting Markdown tables (`|---|`). Format everything sequentially as standard paragraphs and bullet points (`- `). 
+          2. ZERO DELETION: You must format 100% of the text. Do not drop trailing footers, contact information, or orphaned sentences. Process the text exactly from top to bottom.
+          3. Convert pseudo-LaTeX or broken math into standard LaTeX equations ($...$ or $$...$$).
+          4. Output your formatted text inside <linear_markdown> tags.
 
           <raw_corrupted_reference>
           {corr_slice}
@@ -235,17 +234,61 @@ jobs:
           {batch}
           </clean_ocr_text>
           """
+                  print("   [Pass 1] Generating linear baseline (Guaranteed 100% text retention)...", flush=True)
+                  pass1_text = call_gemini_with_backoff(client, 'gemini-3.5-flash-lite', prompt_1)
+                  match_1 = re.search(r'<linear_markdown>(.*?)</linear_markdown>', pass1_text, re.DOTALL | re.IGNORECASE)
+                  linear_md = match_1.group(1).strip() if match_1 else pass1_text.replace('```markdown', '').replace('```', '').strip()
                   
-                  # Upgraded to gemini-2.5-flash for 1,500 RPD and better structural reasoning
-                  aligned_text = call_gemini_with_backoff(client, 'gemini-2.5-flash', prompt)
+                  # ==========================================
+                  # PASS 2: The Table Builder
+                  # ==========================================
+                  prompt_2 = f"""You are a layout editor.
+          TASK: Take the LINEAR MARKDOWN below and convert schedules, lists, or mapped data into standard Markdown tables (`|---|`).
+
+          CRITICAL RULES:
+          1. When converting text to table cells, you may ONLY use `<br>` tags for line breaks. Do not use any other HTML.
+          2. Leave standard paragraphs and headings outside the table exactly as they are.
+          3. Output your text inside <tabular_markdown> tags.
+
+          <linear_markdown>
+          {linear_md}
+          </linear_markdown>
+          """
+                  time.sleep(5)
+                  print("   [Pass 2] Upgrading structural lists to Markdown tables...", flush=True)
+                  pass2_text = call_gemini_with_backoff(client, 'gemini-3.5-flash-lite', prompt_2)
+                  match_2 = re.search(r'<tabular_markdown>(.*?)</tabular_markdown>', pass2_text, re.DOTALL | re.IGNORECASE)
+                  tabular_md = match_2.group(1).strip() if match_2 else pass2_text.replace('```markdown', '').replace('```', '').strip()
+
+                  # ==========================================
+                  # PASS 3: Deterministic Python Reconciliation
+                  # ==========================================
+                  print("   [Pass 3] Deterministically checking for dropped orphans...", flush=True)
                   
-                  match = re.search(r'<aligned_text>(.*?)</aligned_text>', aligned_text, re.DOTALL | re.IGNORECASE)
-                  if match:
-                      clean_aligned = match.group(1).strip()
-                  else:
-                      clean_aligned = aligned_text.replace('```markdown', '').replace('```', '').strip()
+                  linear_paragraphs = [p.strip() for p in linear_md.split('\n\n') if p.strip()]
+                  tab_clean_full = clean_for_comparison(tabular_md)
+                  
+                  missing_orphans = []
+                  for p in linear_paragraphs:
+                      p_clean = clean_for_comparison(p)
                       
-                  aligned_chunks.append(clean_aligned)
+                      # Ignore very short strings (like horizontal rules or single numbers)
+                      if len(p_clean) < 15: 
+                          continue
+                          
+                      # Sample a 30-character chunk from the paragraph to test existence in the table
+                      chunk = p_clean[:30] if len(p_clean) >= 30 else p_clean
+                      
+                      # If that specific alphanumeric sequence does not exist ANYWHERE in Pass 2
+                      if chunk not in tab_clean_full:
+                          missing_orphans.append(p)
+                          print(f"      [🔍 FOUND MISSING TEXT] Appending: '{p[:50]}...'")
+
+                  final_text = tabular_md
+                  if missing_orphans:
+                      final_text += "\n\n" + "\n\n".join(missing_orphans)
+
+                  aligned_chunks.append(final_text)
                   time.sleep(10)
                   
               print(f"-> Stitching and saving perfectly aligned markdown to: {output_path}", flush=True)

@@ -114,9 +114,10 @@ jobs:
           git pull --rebase origin main
           git push origin HEAD:main
 
-      - name: Triangulate & Align Formatting via Gemini
+      - name: Triangulate & Align Formatting via Hybrid LLMs
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           PYTHONUNBUFFERED: "1"
         run: |
           cat << 'EOF' > align_formatting.py
@@ -127,6 +128,7 @@ jobs:
           import re
           from pathlib import Path
           from google import genai
+          from openai import OpenAI
 
           def heuristic_cleanup(text):
               text = text.replace('**', '∆∆').replace('*', '∆')
@@ -142,10 +144,6 @@ jobs:
               final_text = final_text.replace('∆∆', '**').replace('∆', '*')
               return final_text
 
-          def clean_for_comparison(text):
-              # Strip all formatting, spaces, and special characters for a pure alphanumeric text match
-              return re.sub(r'[^a-zA-Z0-9]', '', text).lower()
-
           def call_gemini_with_backoff(client, model, prompt, base_delay=5, max_delay=60, max_retries=30):
               delay = base_delay
               attempt = 1
@@ -158,20 +156,49 @@ jobs:
                       return response.text
                   except Exception as e:
                       if attempt >= max_retries:
-                          print(f"\n❌ FATAL: Max retries ({max_retries}) reached.", flush=True)
+                          print(f"\n❌ FATAL: Gemini max retries ({max_retries}) reached.", flush=True)
                           sys.exit(1)
                       error_str = str(e)
                       if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str:
                           match = re.search(r'retry in ([\d\.]+)s', error_str, re.IGNORECASE)
                           wait_time = float(match.group(1)) + 2.0 if match else 65.0
-                          print(f"🛑 Rate limit hit. Pausing {wait_time}s...", flush=True)
+                          print(f"🛑 Gemini rate limit hit. Pausing {wait_time}s...", flush=True)
                           time.sleep(wait_time)
                           attempt += 1
                           continue
 
                       jitter = random.uniform(0.5, 2.0)
                       wait_time = delay + jitter
-                      print(f"⚠️ API temporary error: {e}. Retrying in {wait_time:.1f}s...", flush=True)
+                      print(f"⚠️ Gemini temporary error: {e}. Retrying in {wait_time:.1f}s...", flush=True)
+                      time.sleep(wait_time)
+                      delay = min(delay * 2, max_delay)
+                      attempt += 1
+
+          def call_openrouter_with_backoff(client, model, prompt, base_delay=5, max_delay=60, max_retries=30):
+              delay = base_delay
+              attempt = 1
+              while True:
+                  try:
+                      response = client.chat.completions.create(
+                          model=model,
+                          messages=[{"role": "user", "content": prompt}]
+                      )
+                      return response.choices[0].message.content
+                  except Exception as e:
+                      if attempt >= max_retries:
+                          print(f"\n❌ FATAL: OpenRouter max retries ({max_retries}) reached.", flush=True)
+                          sys.exit(1)
+                      error_str = str(e)
+                      if '429' in error_str or 'RateLimit' in error_str:
+                          wait_time = 15.0
+                          print(f"🛑 OpenRouter rate limit hit. Pausing {wait_time}s...", flush=True)
+                          time.sleep(wait_time)
+                          attempt += 1
+                          continue
+
+                      jitter = random.uniform(0.5, 2.0)
+                      wait_time = delay + jitter
+                      print(f"⚠️ OpenRouter temporary error: {e}. Retrying in {wait_time:.1f}s...", flush=True)
                       time.sleep(wait_time)
                       delay = min(delay * 2, max_delay)
                       attempt += 1
@@ -182,7 +209,12 @@ jobs:
               with open(clean_path, 'r', encoding='utf-8') as f:
                   clean_text = f.read()
                   
-              client = genai.Client()
+              gemini_client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
+              openrouter_client = OpenAI(
+                  base_url="https://openrouter.ai/api/v1",
+                  api_key=os.environ.get("OPENROUTER_API_KEY")
+              )
+              
               paragraphs = clean_text.split('\n\n')
               batches = []
               current_batch = ""
@@ -211,7 +243,7 @@ jobs:
                   heuristic_slice = heuristic_cleanup(corr_slice)
                   
                   # ==========================================
-                  # PASS 1: The Linear Baseline (Source of Truth)
+                  # PASS 1: The Linear Baseline (Gemini Flash Lite)
                   # ==========================================
                   prompt_1 = f"""You are a strict Markdown formatter.
           TASK: Apply formatting (**bold**, *italics*) to the CLEAN OCR TEXT based on the visual hints in the REFERENCES.
@@ -234,62 +266,34 @@ jobs:
           {batch}
           </clean_ocr_text>
           """
-                  print("   [Pass 1] Generating linear baseline (Guaranteed 100% text retention)...", flush=True)
-                  pass1_text = call_gemini_with_backoff(client, 'gemini-3.5-flash-lite', prompt_1)
+                  print("   [Pass 1] Gemini Flash Lite: Generating linear baseline (100% text retention)...", flush=True)
+                  pass1_text = call_gemini_with_backoff(gemini_client, 'gemini-3.5-flash-lite', prompt_1)
                   match_1 = re.search(r'<linear_markdown>(.*?)</linear_markdown>', pass1_text, re.DOTALL | re.IGNORECASE)
                   linear_md = match_1.group(1).strip() if match_1 else pass1_text.replace('```markdown', '').replace('```', '').strip()
                   
                   # ==========================================
-                  # PASS 2: The Table Builder
+                  # PASS 2: The Table Builder (Llama 3.3 70B via OpenRouter)
                   # ==========================================
-                  prompt_2 = f"""You are a layout editor.
+                  prompt_2 = f"""You are an advanced layout editor.
           TASK: Take the LINEAR MARKDOWN below and convert schedules, lists, or mapped data into standard Markdown tables (`|---|`).
 
           CRITICAL RULES:
           1. When converting text to table cells, you may ONLY use `<br>` tags for line breaks. Do not use any other HTML.
-          2. Leave standard paragraphs and headings outside the table exactly as they are.
+          2. Leave standard paragraphs, footnotes, contact information, and headings outside the table exactly as they are. DO NOT delete any text.
           3. Output your text inside <tabular_markdown> tags.
 
           <linear_markdown>
           {linear_md}
           </linear_markdown>
           """
-                  time.sleep(5)
-                  print("   [Pass 2] Upgrading structural lists to Markdown tables...", flush=True)
-                  pass2_text = call_gemini_with_backoff(client, 'gemini-3.5-flash-lite', prompt_2)
+                  time.sleep(3) # Respect OpenRouter 20 RPM limit
+                  print("   [Pass 2] OpenRouter (Llama 3.3 70B): Upgrading layout to tables...", flush=True)
+                  pass2_text = call_openrouter_with_backoff(openrouter_client, 'meta-llama/llama-3.3-70b-instruct:free', prompt_2)
                   match_2 = re.search(r'<tabular_markdown>(.*?)</tabular_markdown>', pass2_text, re.DOTALL | re.IGNORECASE)
-                  tabular_md = match_2.group(1).strip() if match_2 else pass2_text.replace('```markdown', '').replace('```', '').strip()
-
-                  # ==========================================
-                  # PASS 3: Deterministic Python Reconciliation
-                  # ==========================================
-                  print("   [Pass 3] Deterministically checking for dropped orphans...", flush=True)
-                  
-                  linear_paragraphs = [p.strip() for p in linear_md.split('\n\n') if p.strip()]
-                  tab_clean_full = clean_for_comparison(tabular_md)
-                  
-                  missing_orphans = []
-                  for p in linear_paragraphs:
-                      p_clean = clean_for_comparison(p)
-                      
-                      # Ignore very short strings (like horizontal rules or single numbers)
-                      if len(p_clean) < 15: 
-                          continue
-                          
-                      # Sample a 30-character chunk from the paragraph to test existence in the table
-                      chunk = p_clean[:30] if len(p_clean) >= 30 else p_clean
-                      
-                      # If that specific alphanumeric sequence does not exist ANYWHERE in Pass 2
-                      if chunk not in tab_clean_full:
-                          missing_orphans.append(p)
-                          print(f"      [🔍 FOUND MISSING TEXT] Appending: '{p[:50]}...'")
-
-                  final_text = tabular_md
-                  if missing_orphans:
-                      final_text += "\n\n" + "\n\n".join(missing_orphans)
+                  final_text = match_2.group(1).strip() if match_2 else pass2_text.replace('```markdown', '').replace('```', '').strip()
 
                   aligned_chunks.append(final_text)
-                  time.sleep(10)
+                  time.sleep(3)
                   
               print(f"-> Stitching and saving perfectly aligned markdown to: {output_path}", flush=True)
               with open(output_path, 'w', encoding='utf-8') as f:

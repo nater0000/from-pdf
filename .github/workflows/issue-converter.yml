@@ -6,7 +6,7 @@ on:
 
 concurrency:
   group: pdf-converter
-  cancel-in-progress: false # We want them to queue up, not cancel each other
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -115,6 +115,7 @@ jobs:
         run: |
           git add conversions/issue-${{ github.event.issue.number }}/
           git commit -m "Checkpoint: Save raw OCR results for issue #${{ github.event.issue.number }} [skip ci]" || echo "No new OCR changes to commit"
+          git pull --rebase origin main
           git push origin HEAD:main
 
       - name: Triangulate & Align Formatting via Gemini
@@ -300,6 +301,7 @@ jobs:
         run: |
           git add conversions/issue-${{ github.event.issue.number }}/
           git commit -m "Auto-generate aligned markdown for issue #${{ github.event.issue.number }} [skip ci]" || echo "No final changes to commit"
+          git pull --rebase origin main
           git push origin HEAD:main
 
       - name: Post Direct Download Links

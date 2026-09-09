@@ -230,6 +230,7 @@ jobs:
           3. Your output MUST perfectly match the EXACT words, spelling, line breaks, and spaces of the CLEAN OCR TEXT, with ONE EXCEPTION:
              - MATHEMATICAL FORMULAS: When you encounter pseudo-LaTeX, ASCII math, or broken equation typography (e.g., `v[...]` or `\vartheta[...]` for square root, `\wedge^2` for squared, `y = 1/v[...]` for the Lorentz factor, `1_p` for `l_p`, `\Sigma_i` for summation, missing brackets, etc.), convert them into clean, valid, standard LaTeX equations ($...$ for inline, $$...$$ for block display).
           4. You MUST output your final processed text strictly inside <aligned_text> and </aligned_text> XML tags.
+          5. NEVER use HTML tags (like `<ul>`, `<li>`, `<table>`, `<p>`, etc.). If you encounter a complex table or multi-column layout that requires multi-line cells, flatten it into standard markdown headings and bulleted lists instead of forcing it into a markdown table.
 
           <raw_corrupted_reference>
           {corr_slice}

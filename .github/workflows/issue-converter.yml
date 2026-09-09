@@ -4,6 +4,10 @@ on:
   issues:
     types: [opened, edited, reopened]
 
+concurrency:
+  group: pdf-converter
+  cancel-in-progress: false # We want them to queue up, not cancel each other
+
 permissions:
   contents: write
   issues: write

@@ -223,18 +223,18 @@ jobs:
                   corr_slice = corr_text[start_est:end_est]
                   heuristic_slice = heuristic_cleanup(corr_slice)
                   
-                  prompt = f"""You are a strict, automated text alignment parser. You are NOT a conversational AI.
-          Task: Apply markdown formatting (**bold**, *italics*, etc.) to the CLEAN OCR TEXT below based on the provided references.
+                  prompt = f"""You are a strict, automated text alignment parser.
 
           CRITICAL RULES:
-          1. NEVER converse, advise, or respond to the content. Do not act as a therapist.
-          2. DO NOT format non-alphanumeric markdown syntax. Never inject ** or * inside image tags (like ![]() ) or URLs.
-          3. Your output MUST perfectly match the EXACT words, spelling, line breaks, and spaces of the CLEAN OCR TEXT, with ONE EXCEPTION:
-             - MATHEMATICAL FORMULAS: Convert pseudo-LaTeX or broken math into clean, valid, standard LaTeX equations ($...$ or $$...$$).
-          4. You MUST output your final processed text strictly inside <aligned_text> and </aligned_text> XML tags.
-          5. TABLES AND HTML: You may use standard Markdown tables (`|---|`) to reconstruct visual column layouts. To handle multiple lines inside a single table cell, you are ONLY allowed to use `<br>` tags. You are STRICTLY FORBIDDEN from using any other HTML tags (`<ul>`, `<li>`, `<p>`, `<b>`, etc.). For bullet points inside a table, format them as `- Item 1<br>- Item 2`.
-          6. THE "ORPHAN TEXT" RULE (CRITICAL): When you build tables, you tend to drop the text that immediately precedes the isolated timestamps at the bottom of the raw text. You MUST actively look for footers, contact information, URLs, or summary paragraphs at the end of the `clean_ocr_text` and print them as standard paragraphs AT THE VERY END of your output, outside and below the table.
-          7. ZERO DELETION POLICY: 100% of the words in the `clean_ocr_text` MUST appear in your output. Do not summarize. Do not truncate. Do not stop generating until every paragraph, link, and email address has been included in your final response.
+          1. NEVER converse, advise, or respond to the content.
+          2. MATHEMATICAL FORMULAS: Convert pseudo-LaTeX or broken math into clean LaTeX equations ($...$ or $$...$$).
+          3. TABLES AND HTML: You may use standard Markdown tables (`|---|`). You are ONLY allowed to use `<br>` tags to handle multiple lines in a table. You are STRICTLY FORBIDDEN from using `<b>`, `<u>`, `<i>`, `<ul>`, `<li>`, or `<p>`. Use pure Markdown formatting (`**bold**`, `*italics*`).
+          4. ZERO DELETION POLICY: 100% of the words in the `clean_ocr_text` MUST appear in your output. Do not summarize or truncate.
+
+          REQUIRED OUTPUT FORMAT:
+          You must process the text in two distinct steps to ensure no text is lost:
+          Step 1: Open a <scratchpad> XML block. Look closely at the `clean_ocr_text`. Identify any "Orphan Text" (e.g., contact info, URLs, footers, or paragraphs) that appears before or between the stray timestamps. Copy that orphan text into the scratchpad so you don't forget it.
+          Step 2: Open an <aligned_text> XML block. Output your final, perfectly formatted Markdown. Build the table using the timestamps, and then ALWAYS append the Orphan Text from your scratchpad at the very bottom of the document.
 
           <raw_corrupted_reference>
           {corr_slice}

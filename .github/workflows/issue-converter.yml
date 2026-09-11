@@ -41,36 +41,21 @@ jobs:
           echo "LD_LIBRARY_PATH=/opt/llama_bin:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Extract PDF URL and Download
-        id: extract
         run: |
           PDF_URL=$(echo "${{ github.event.issue.body }}" | grep -oP 'https://github\.com/user-attachments/(files|assets)/[^)]+\.pdf' | head -n 1)
-          if [ -z "$PDF_URL" ]; then
-            echo "No PDF found in the issue body."
-            exit 1
-          fi
+          if [ -z "$PDF_URL" ]; then exit 1; fi
           curl -L -o document.pdf "$PDF_URL"
 
-      - name: Fetch Latest Checkpoints
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git config pull.rebase false
-          git pull origin main || echo "No new commits to pull"
-
-      - name: Parse Issue Commands
+      - name: Parse Commands
         run: |
           if echo "${{ github.event.issue.body }}" | grep -iq "/force-ocr"; then
-            echo "⚠️ /force-ocr command detected. Clearing cached OCR data..."
             rm -rf conversions/issue-${{ github.event.issue.number }}/corrupted
             rm -rf conversions/issue-${{ github.event.issue.number }}/fixed
           fi
-          
           PAGE_RANGE=$(echo "${{ github.event.issue.body }}" | grep -oP '/page-range\s+\K[\d-]+' | head -n 1)
           if [ -n "$PAGE_RANGE" ]; then
-            echo "📄 /page-range command detected: $PAGE_RANGE"
             echo "PAGE_ARG=--page_range $PAGE_RANGE" >> $GITHUB_ENV
           else
-            echo "📄 No page range specified. Processing entire document."
             echo "PAGE_ARG=" >> $GITHUB_ENV
           fi
 
@@ -78,10 +63,7 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          if [ -f "conversions/issue-${{ github.event.issue.number }}/corrupted/document/document.md" ]; then
-            echo "✅ Corrupted text layer already extracted. Skipping."
-          else
-            rm -rf conversions/issue-${{ github.event.issue.number }}/corrupted
+          if [ ! -f "conversions/issue-${{ github.event.issue.number }}/corrupted/document/document.md" ]; then
             mkdir -p conversions/issue-${{ github.event.issue.number }}/corrupted
             marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }}/corrupted --mode fast --disable_ocr $PAGE_ARG
           fi
@@ -90,33 +72,19 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          if [ -f "conversions/issue-${{ github.event.issue.number }}/fixed/document/document.md" ]; then
-            echo "✅ Fixed OCR layer already extracted. Skipping."
-          else
+          if [ ! -f "conversions/issue-${{ github.event.issue.number }}/fixed/document/document.md" ]; then
             mkdir -p conversions/issue-${{ github.event.issue.number }}/fixed
             marker_single document.pdf --output_dir conversions/issue-${{ github.event.issue.number }}/fixed --mode fast --force_ocr --debug $PAGE_ARG
           fi
 
-      - name: Checkpoint Commit (Save Raw OCR Progress)
-        run: |
-          git add conversions/issue-${{ github.event.issue.number }}/
-          git commit -m "Checkpoint: Save raw OCR results for issue #${{ github.event.issue.number }} [skip ci]" || echo "No new OCR changes to commit"
-          git pull --rebase origin main
-          git push origin HEAD:main
-
-      - name: Triangulate & Align Formatting via Cascading LLMs
+      - name: Triangulate & Align Formatting via Python Chunking
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           PYTHONUNBUFFERED: "1"
         run: |
           cat << 'EOF' > align_formatting.py
-          import os
-          import random
-          import sys
-          import time
-          import re
-          import collections
+          import os, random, sys, time, re, collections
           from pathlib import Path
           from google import genai
           from openai import OpenAI
@@ -124,30 +92,8 @@ jobs:
           model_usage_stats = collections.defaultdict(int)
           disabled_providers = set()
 
-          def heuristic_cleanup(text):
-              text = text.replace('**', '∆∆').replace('*', '∆')
-              chunks = re.split(r'( {2,}|\n+)', text)
-              cleaned_chunks = []
-              for chunk in chunks:
-                  if chunk.isspace():
-                      cleaned_chunks.append(chunk) 
-                  else:
-                      cleaned_chunk = re.sub(r'(?<=\S) (?=\S)', '', chunk)
-                      cleaned_chunks.append(cleaned_chunk)
-              final_text = ''.join(cleaned_chunks)
-              final_text = final_text.replace('∆∆', '**').replace('∆', '*')
-              return final_text
-
-          def clean_for_comparison(text):
-              return re.sub(r'[^a-zA-Z0-9]', '', text).lower()
-              
-          def extract_tokens(text):
-              # Extracts meaningful words (3+ characters) to calculate text overlap
-              return set(re.findall(r'[a-zA-Z0-9]{3,}', text.lower()))
-
           def call_llm(prompt, pass_name):
               global model_usage_stats, disabled_providers
-              
               models = [
                   {'provider': 'google', 'model': 'gemini-3.5-flash-lite'},
                   {'provider': 'google', 'model': 'gemini-3.1-flash-lite'},
@@ -155,238 +101,95 @@ jobs:
               ]
               
               for cfg in models:
-                  provider = cfg['provider']
-                  model_name = cfg['model']
+                  provider, model_name = cfg['provider'], cfg['model']
+                  if provider in disabled_providers: continue
                   
-                  if provider in disabled_providers:
-                      continue
-                      
-                  print(f"   [{pass_name}] Attempting with {model_name}...", flush=True)
-                  
-                  delay = 5
-                  attempt = 1
-                  max_retries = 3 
-                  
-                  success = False
-                  response_text = ""
-                  
+                  attempt, max_retries, delay = 1, 3, 5
                   while attempt <= max_retries:
                       try:
                           if provider == 'google':
-                              if not os.environ.get("GOOGLE_API_KEY"):
-                                  raise Exception("401 Missing GOOGLE_API_KEY")
                               client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
-                              response = client.models.generate_content(
-                                  model=model_name,
-                                  contents=prompt
-                              )
-                              response_text = response.text
+                              res = client.models.generate_content(model=model_name, contents=prompt).text
                           elif provider == 'openrouter':
-                              if not os.environ.get("OPENROUTER_API_KEY"):
-                                  raise Exception("401 Missing OPENROUTER_API_KEY")
-                              client = OpenAI(
-                                  base_url="https://openrouter.ai/api/v1",
-                                  api_key=os.environ.get("OPENROUTER_API_KEY")
-                              )
-                              response = client.chat.completions.create(
-                                  model=model_name,
-                                  messages=[{"role": "user", "content": prompt}]
-                              )
-                              response_text = response.choices[0].message.content
+                              client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.environ.get("OPENROUTER_API_KEY"))
+                              res = client.chat.completions.create(model=model_name, messages=[{"role": "user", "content": prompt}]).choices[0].message.content
                           
-                          success = True
-                          model_usage_stats[model_name] += 1
-                          break
-                          
+                          if res:
+                              model_usage_stats[model_name] += 1
+                              return res
                       except Exception as e:
                           error_str = str(e)
-                          if '403' in error_str or 'PERMISSION_DENIED' in error_str or '401' in error_str or 'UNAUTHENTICATED' in error_str:
-                              print(f"   ⚠️ Fatal {provider.upper()} API error: {error_str}. Disabling provider.", flush=True)
+                          if any(err in error_str for err in ['403', 'PERMISSION_DENIED', '401']):
                               disabled_providers.add(provider)
                               break 
-                          
-                          if '404' in error_str or 'unavailable' in error_str.lower():
-                              print(f"   ⚠️ Model {model_name} unavailable: {error_str}. Moving to next model.", flush=True)
-                              break 
-                          
-                          if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str or 'RateLimit' in error_str:
-                              wait_time = 15.0
-                              match = re.search(r'retry in ([\d\.]+)s', error_str, re.IGNORECASE)
-                              if match:
-                                  wait_time = float(match.group(1)) + 2.0
-                              print(f"   🛑 Rate limit hit (Attempt {attempt}/{max_retries}). Pausing {wait_time}s...", flush=True)
-                              time.sleep(wait_time)
-                              attempt += 1
-                              continue
-                          
-                          jitter = random.uniform(0.5, 2.0)
-                          wait_time = delay + jitter
-                          print(f"   ⚠️ Temp error (Attempt {attempt}/{max_retries}): {error_str}. Retrying in {wait_time:.1f}s...", flush=True)
-                          time.sleep(wait_time)
-                          delay = min(delay * 2, 60)
-                          attempt += 1
-                          
-                  if success:
-                      return response_text
-                      
-              print("\n❌ FATAL: All models and fallbacks exhausted.", flush=True)
+                          if '404' in error_str: break 
+                          if any(err in error_str for err in ['429', 'RESOURCE_EXHAUSTED', 'RateLimit']):
+                              time.sleep(15.0)
+                          else:
+                              time.sleep(delay + random.uniform(0.5, 2.0))
+                              delay = min(delay * 2, 60)
+                      attempt += 1
+              print("\n❌ FATAL: All models exhausted.", flush=True)
               sys.exit(1)
 
-          def fuzzy_llm_merge(corrupted_path, clean_path, output_path, summary_path):
-              with open(corrupted_path, 'r', encoding='utf-8') as f:
-                  corr_text = f.read()
+          def process_document(clean_path, output_path, summary_path):
               with open(clean_path, 'r', encoding='utf-8') as f:
                   clean_text = f.read()
+
+              # 1. Python breaks document into exact, sequential blocks
+              blocks = [b.strip() for b in clean_text.split('\n\n') if b.strip()]
+              final_document = []
+
+              for i, block in enumerate(blocks):
+                  print(f"-> Processing Block {i+1}/{len(blocks)}...", flush=True)
+                  lines = block.split('\n')
                   
-              paragraphs = clean_text.split('\n\n')
-              batches = []
-              current_batch = ""
-              for p in paragraphs:
-                  if not p.strip(): continue
-                  if len(current_batch) + len(p) > 6000:
-                      batches.append(current_batch)
-                      current_batch = p
+                  # 2. Python Routing Logic: Is this a table/schedule?
+                  list_markers = sum(1 for line in lines if re.match(r'^[\-\*\•\d]', line.strip()))
+                  has_times = bool(re.search(r'\d{1,2}:\d{2}\s*(am|pm)', block, re.IGNORECASE))
+                  
+                  if (list_markers >= 2 and len(lines) >= 3) or (has_times and len(lines) >= 3):
+                      print("   [LLM Route] Structural block detected. Converting to table...", flush=True)
+                      prompt = f"""Convert this exact text block into a Markdown table (`|---|`). 
+                      CRITICAL: DO NOT add, summarize, or delete any words. Keep the exact text, just map it into columns. Use `<br>` for line breaks in cells.
+                      
+                      <text>
+                      {block}
+                      </text>"""
+                      
+                      res = call_llm(prompt, "Table Builder")
+                      md = re.search(r'```(?:markdown)?\n(.*?)\n```', res, re.DOTALL)
+                      final_document.append(md.group(1).strip() if md else res.strip())
                   else:
-                      current_batch += "\n\n" + p if current_batch else p
-              if current_batch:
-                  batches.append(current_batch)
-
-              aligned_chunks = []
-              ratio = len(corr_text) / max(1, len(clean_text))
-              current_clean_idx = 0
-              
-              for i, batch in enumerate(batches):
-                  if not batch.strip(): continue
-                  print(f"\n-> Processing batch {i+1}/{len(batches)}...", flush=True)
-                  
-                  current_clean_idx = clean_text.find(batch, current_clean_idx)
-                  start_est = max(0, int(current_clean_idx * ratio) - 2500)
-                  end_est = min(len(corr_text), int((current_clean_idx + len(batch)) * ratio) + 2500)
-                  corr_slice = corr_text[start_est:end_est]
-                  heuristic_slice = heuristic_cleanup(corr_slice)
-                  
-                  # ==========================================
-                  # PASS 1: Linear Markdown Generation
-                  # ==========================================
-                  prompt_1 = f"""You are a strict Markdown formatter.
-          TASK: Apply formatting (**bold**, *italics*) to the CLEAN OCR TEXT based on the visual hints in the REFERENCES.
-
-          CRITICAL RULES:
-          1. ABSOLUTELY NO TABLES: You are strictly forbidden from outputting Markdown tables (`|---|`). Format everything sequentially as standard paragraphs and bullet points (`- `). 
-          2. ZERO DELETION: You must format 100% of the text. Do not drop trailing footers, contact information, or orphaned sentences. Process the text exactly from top to bottom.
-          3. Convert pseudo-LaTeX or broken math into standard LaTeX equations ($...$ or $$...$$).
-          4. Output your formatted text inside <linear_markdown> tags.
-
-          <raw_corrupted_reference>
-          {corr_slice}
-          </raw_corrupted_reference>
-
-          <heuristic_reference>
-          {heuristic_slice}
-          </heuristic_reference>
-
-          <clean_ocr_text>
-          {batch}
-          </clean_ocr_text>
-          """
-                  pass1_text = call_llm(prompt_1, "Pass 1 - Linear Format")
-                  match_1 = re.search(r'<linear_markdown>(.*?)</linear_markdown>', pass1_text, re.DOTALL | re.IGNORECASE)
-                  linear_md = match_1.group(1).strip() if match_1 else pass1_text.replace('```markdown', '').replace('```', '').strip()
-                  
-                  time.sleep(4)
-                  
-                  # ==========================================
-                  # PASS 2: Table Reconstruction
-                  # ==========================================
-                  prompt_2 = f"""You are an advanced layout editor.
-          TASK: Take the LINEAR MARKDOWN below and convert schedules, lists, or mapped data into standard Markdown tables (`|---|`).
-
-          CRITICAL RULES:
-          1. When converting text to table cells, you may ONLY use `<br>` tags for line breaks. Do not use any other HTML.
-          2. Leave standard paragraphs, footnotes, contact information, and headings outside the table exactly as they are. DO NOT delete any text.
-          3. Output your text inside <tabular_markdown> tags.
-
-          <linear_markdown>
-          {linear_md}
-          </linear_markdown>
-          """
-                  pass2_text = call_llm(prompt_2, "Pass 2 - Table Builder")
-                  match_2 = re.search(r'<tabular_markdown>(.*?)</tabular_markdown>', pass2_text, re.DOTALL | re.IGNORECASE)
-                  tabular_md = match_2.group(1).strip() if match_2 else pass2_text.replace('```markdown', '').replace('```', '').strip()
-
-                  # ==========================================
-                  # PASS 3: Python Token Overlap Verification
-                  # ==========================================
-                  print("   [Pass 3] Python: Deterministically checking raw OCR for dropped text...", flush=True)
-                  
-                  raw_lines = [line.strip() for line in batch.split('\n') if len(line.strip()) > 10]
-                  final_clean = clean_for_comparison(tabular_md)
-                  generated_tokens = extract_tokens(tabular_md)
-                  
-                  missing_orphans = []
-                  
-                  for line in raw_lines:
-                      line_clean = clean_for_comparison(line)
-                      if len(line_clean) < 15: 
-                          continue
-                          
-                      raw_tokens = extract_tokens(line)
+                      print("   [Python Route] Standard text detected. Formatting inline...", flush=True)
+                      prompt = f"""Apply bold and italic markdown to this text to make it readable. 
+                      CRITICAL: DO NOT format this as a table. DO NOT add, summarize, or delete any words. Output ONLY the exact text provided, with inline markdown applied.
                       
-                      # Fallback for very short alphanumeric strings (like timestamps)
-                      if len(raw_tokens) < 3:
-                          found_in_final = False
-                          window_size = 10
-                          if len(line_clean) >= window_size:
-                              for i in range(len(line_clean) - window_size + 1):
-                                  if line_clean[i:i+window_size] in final_clean:
-                                      found_in_final = True
-                                      break
-                          if not found_in_final and line not in missing_orphans:
-                              missing_orphans.append(line)
-                              print(f"      [🔍 FOUND MISSING TEXT] Recovered: '{line[:60]}...'")
-                          continue
-                          
-                      # Calculate token overlap percentage for standard sentences
-                      overlap = len(raw_tokens.intersection(generated_tokens)) / len(raw_tokens)
+                      <text>
+                      {block}
+                      </text>"""
                       
-                      # If less than 50% of the words from the raw line made it into the final output, it was dropped
-                      if overlap < 0.50 and line not in missing_orphans:
-                          missing_orphans.append(line)
-                          print(f"      [🔍 FOUND MISSING TEXT] Recovered: '{line[:60]}...' (Overlap: {overlap:.1%})", flush=True)
-
-                  final_text = tabular_md
-                  if missing_orphans:
-                      final_text += "\n\n" + "\n\n".join(missing_orphans)
-
-                  aligned_chunks.append(final_text)
-                  time.sleep(4)
+                      res = call_llm(prompt, "Inline Formatter")
+                      final_document.append(res.replace('```markdown', '').replace('```', '').strip())
+                      
+                  time.sleep(4) # Rate limit pacing
                   
-              print(f"\n-> Stitching and saving perfectly aligned markdown to: {output_path}", flush=True)
+              print(f"\n-> Saving 1:1 aligned markdown to: {output_path}", flush=True)
               with open(output_path, 'w', encoding='utf-8') as f:
-                  f.write('\n\n'.join(aligned_chunks))
+                  f.write('\n\n'.join(final_document))
                   
-              print("\n" + "="*40)
-              print("🤖 MODEL USAGE SUMMARY")
-              print("="*40)
               with open(summary_path, 'w', encoding='utf-8') as f:
                   f.write("### 🤖 Model Usage Summary\n")
                   for m, count in model_usage_stats.items():
-                      stat_line = f"- **{m}**: {count} successful calls"
-                      print(stat_line)
-                      f.write(stat_line + "\n")
-              print("="*40 + "\n", flush=True)
+                      f.write(f"- **{m}**: {count} successful calls\n")
 
           if __name__ == "__main__":
               issue_num = sys.argv[1]
-              corrupted_md = Path(f"conversions/issue-{issue_num}/corrupted/document/document.md")
-              clean_md = Path(f"conversions/issue-{issue_num}/fixed/document/document.md")
-              output_md = Path(f"conversions/issue-{issue_num}/document_aligned.md")
-              summary_md = Path(f"conversions/issue-{issue_num}/model_summary.md")
-              if corrupted_md.exists() and clean_md.exists():
-                  fuzzy_llm_merge(corrupted_md, clean_md, output_md, summary_md)
-                  print("✅ Multi-batch alignment complete.", flush=True)
-              else:
-                  sys.exit("❌ Missing input files.")
+              process_document(
+                  f"conversions/issue-{issue_num}/fixed/document/document.md",
+                  f"conversions/issue-{issue_num}/document_aligned.md",
+                  f"conversions/issue-{issue_num}/model_summary.md"
+              )
           EOF
           
           python align_formatting.py ${{ github.event.issue.number }}
@@ -412,24 +215,14 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
             const issueNum = context.issue.number;
-            
-            let modelSummary = "";
-            try {
-              modelSummary = fs.readFileSync(`conversions/issue-${issueNum}/model_summary.md`, 'utf8');
-            } catch (e) {
-              modelSummary = "_Model tracking information unavailable._";
-            }
-            
-            const rawMdUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/conversions/issue-${issueNum}/document_aligned.md`;
-            const obsidianZipUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/conversions/issue-${issueNum}/obsidian_ready.zip`;
-            const debugZipUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/conversions/issue-${issueNum}/debug_archive.zip`;
+            let modelSummary = fs.existsSync(`conversions/issue-${issueNum}/model_summary.md`) 
+              ? fs.readFileSync(`conversions/issue-${issueNum}/model_summary.md`, 'utf8') 
+              : "_Model tracking information unavailable._";
             
             await github.rest.issues.createComment({
               issue_number: issueNum,
-              owner: owner,
-              repo: repo,
-              body: `✅ **Alignment Complete!**\n\nAll math equations have been converted to standard LaTeX format. The final files have been packaged perfectly for Obsidian.\n\n${modelSummary}\n\n📄 **Aligned MD Only:** [Download Raw Markdown](${rawMdUrl})\n📚 **Obsidian Vault Folder:** [Download Zip](${obsidianZipUrl})\n📦 **Raw Debug Files:** [Download Zip](${debugZipUrl})`
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `✅ **Alignment Complete!**\n\n${modelSummary}\n\n📄 **Aligned MD Only:** [Download Raw Markdown](https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/main/conversions/issue-${issueNum}/document_aligned.md)\n📚 **Obsidian Vault:** [Download Zip](https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/main/conversions/issue-${issueNum}/obsidian_ready.zip)`
             });

@@ -140,6 +140,10 @@ jobs:
 
           def clean_for_comparison(text):
               return re.sub(r'[^a-zA-Z0-9]', '', text).lower()
+              
+          def extract_tokens(text):
+              # Extracts meaningful words (3+ characters) to calculate text overlap
+              return set(re.findall(r'[a-zA-Z0-9]{3,}', text.lower()))
 
           def call_llm(prompt, pass_name):
               global model_usage_stats, disabled_providers
@@ -311,35 +315,44 @@ jobs:
                   tabular_md = match_2.group(1).strip() if match_2 else pass2_text.replace('```markdown', '').replace('```', '').strip()
 
                   # ==========================================
-                  # PASS 3: Python Reconciliation (Sliding Window vs RAW OCR)
+                  # PASS 3: Python Token Overlap Verification
                   # ==========================================
                   print("   [Pass 3] Python: Deterministically checking raw OCR for dropped text...", flush=True)
                   
-                  # Break the RAW input batch into lines
-                  raw_lines = [line.strip() for line in batch.split('\n') if len(line.strip()) > 20]
+                  raw_lines = [line.strip() for line in batch.split('\n') if len(line.strip()) > 10]
                   final_clean = clean_for_comparison(tabular_md)
+                  generated_tokens = extract_tokens(tabular_md)
                   
                   missing_orphans = []
-                  window_size = 15 # 15-character alphanumeric sliding window
                   
                   for line in raw_lines:
                       line_clean = clean_for_comparison(line)
-                      if len(line_clean) < window_size: 
+                      if len(line_clean) < 15: 
                           continue
                           
-                      found_in_final = False
+                      raw_tokens = extract_tokens(line)
                       
-                      # Slide the 15-char window across the raw line
-                      for i in range(len(line_clean) - window_size + 1):
-                          chunk = line_clean[i:i+window_size]
-                          if chunk in final_clean:
-                              found_in_final = True
-                              break
-                              
-                      # If absolutely zero 15-char sequences from the raw line made it to the final document
-                      if not found_in_final and line not in missing_orphans:
+                      # Fallback for very short alphanumeric strings (like timestamps)
+                      if len(raw_tokens) < 3:
+                          found_in_final = False
+                          window_size = 10
+                          if len(line_clean) >= window_size:
+                              for i in range(len(line_clean) - window_size + 1):
+                                  if line_clean[i:i+window_size] in final_clean:
+                                      found_in_final = True
+                                      break
+                          if not found_in_final and line not in missing_orphans:
+                              missing_orphans.append(line)
+                              print(f"      [🔍 FOUND MISSING TEXT] Recovered: '{line[:60]}...'")
+                          continue
+                          
+                      # Calculate token overlap percentage for standard sentences
+                      overlap = len(raw_tokens.intersection(generated_tokens)) / len(raw_tokens)
+                      
+                      # If less than 50% of the words from the raw line made it into the final output, it was dropped
+                      if overlap < 0.50 and line not in missing_orphans:
                           missing_orphans.append(line)
-                          print(f"      [🔍 FOUND MISSING TEXT] Recovered: '{line[:60]}...'")
+                          print(f"      [🔍 FOUND MISSING TEXT] Recovered: '{line[:60]}...' (Overlap: {overlap:.1%})", flush=True)
 
                   final_text = tabular_md
                   if missing_orphans:

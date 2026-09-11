@@ -138,9 +138,8 @@ jobs:
               final_text = final_text.replace('∆∆', '**').replace('∆', '*')
               return final_text
 
-          def extract_tokens(text):
-              # Returns set of alphanumeric lowercase words of length >= 4
-              return set(re.findall(r'[a-zA-Z0-9]{4,}', text.lower()))
+          def clean_for_comparison(text):
+              return re.sub(r'[^a-zA-Z0-9]', '', text).lower()
 
           def call_llm(prompt, pass_name):
               global model_usage_stats, disabled_providers
@@ -162,7 +161,8 @@ jobs:
                   
                   delay = 5
                   attempt = 1
-                  max_retries = 3
+                  max_retries = 3 
+                  
                   success = False
                   response_text = ""
                   
@@ -188,10 +188,7 @@ jobs:
                                   model=model_name,
                                   messages=[{"role": "user", "content": prompt}]
                               )
-                              choice = response.choices[0]
-                              response_text = choice.message.content or getattr(choice.message, 'reasoning', '')
-                              if not response_text:
-                                  raise Exception("Empty response returned from model.")
+                              response_text = response.choices[0].message.content
                           
                           success = True
                           model_usage_stats[model_name] += 1
@@ -225,7 +222,7 @@ jobs:
                           delay = min(delay * 2, 60)
                           attempt += 1
                           
-                  if success and response_text.strip():
+                  if success:
                       return response_text
                       
               print("\n❌ FATAL: All models and fallbacks exhausted.", flush=True)
@@ -265,17 +262,16 @@ jobs:
                   heuristic_slice = heuristic_cleanup(corr_slice)
                   
                   # ==========================================
-                  # LLM Pass: Markdown & Table Reconstruction
+                  # PASS 1: Linear Markdown Generation
                   # ==========================================
-                  prompt = f"""You are a strict, automated Markdown formatter and layout editor.
+                  prompt_1 = f"""You are a strict Markdown formatter.
+          TASK: Apply formatting (**bold**, *italics*) to the CLEAN OCR TEXT based on the visual hints in the REFERENCES.
 
-          TASK:
-          1. Apply Markdown formatting (**bold**, *italics*, headers) to the CLEAN OCR TEXT based on the visual hints in the REFERENCES.
-          2. Convert multi-column schedules, steps, and mapped timestamps into standard Markdown tables (`|---|`).
+          CRITICAL RULES:
+          1. ABSOLUTELY NO TABLES: You are strictly forbidden from outputting Markdown tables (`|---|`). Format everything sequentially as standard paragraphs and bullet points (`- `). 
+          2. ZERO DELETION: You must format 100% of the text. Do not drop trailing footers, contact information, or orphaned sentences. Process the text exactly from top to bottom.
           3. Convert pseudo-LaTeX or broken math into standard LaTeX equations ($...$ or $$...$$).
-          4. When using table cells, ONLY use `<br>` tags for multiple lines inside a cell.
-          5. CRITICAL: Preserve ALL text from the CLEAN OCR TEXT including trailing paragraphs, footers, URLs, and contact info outside the table. DO NOT drop any text.
-          6. Output your result inside <formatted_markdown> tags.
+          4. Output your formatted text inside <linear_markdown> tags.
 
           <raw_corrupted_reference>
           {corr_slice}
@@ -289,40 +285,70 @@ jobs:
           {batch}
           </clean_ocr_text>
           """
-                  formatted_output = call_llm(prompt, "Formatting Pass")
-                  match = re.search(r'<formatted_markdown>(.*?)</formatted_markdown>', formatted_output, re.DOTALL | re.IGNORECASE)
-                  result_md = match.group(1).strip() if match else formatted_output.replace('```markdown', '').replace('```', '').strip()
+                  pass1_text = call_llm(prompt_1, "Pass 1 - Linear Format")
+                  match_1 = re.search(r'<linear_markdown>(.*?)</linear_markdown>', pass1_text, re.DOTALL | re.IGNORECASE)
+                  linear_md = match_1.group(1).strip() if match_1 else pass1_text.replace('```markdown', '').replace('```', '').strip()
                   
-                  # ==========================================
-                  # Deterministic Python Reconciliation (vs Raw OCR)
-                  # ==========================================
-                  print("   [Reconciliation] Checking raw OCR source of truth for missing blocks...", flush=True)
-                  
-                  raw_paragraphs = [p.strip() for p in batch.split('\n\n') if p.strip()]
-                  generated_tokens = extract_tokens(result_md)
-                  
-                  missing_blocks = []
-                  for raw_p in raw_paragraphs:
-                      # Ignore lone timestamps, single words, or purely numeric lines
-                      raw_tokens = extract_tokens(raw_p)
-                      if len(raw_tokens) < 3:
-                          continue
-                      
-                      # Calculate token overlap percentage with generated output
-                      overlap = len(raw_tokens.intersection(generated_tokens)) / len(raw_tokens)
-                      
-                      # If less than 35% of the paragraph's meaningful words exist in the output, it was dropped
-                      if overlap < 0.35:
-                          print(f"      [🔍 FOUND DROPPED TEXT] Appending: '{raw_p[:60]}...' (Overlap: {overlap:.1%})", flush=True)
-                          missing_blocks.append(raw_p)
-                  
-                  if missing_blocks:
-                      result_md += "\n\n" + "\n\n".join(missing_blocks)
-                      
-                  aligned_chunks.append(result_md)
                   time.sleep(4)
                   
-              print(f"\n-> Stitching and saving aligned markdown to: {output_path}", flush=True)
+                  # ==========================================
+                  # PASS 2: Table Reconstruction
+                  # ==========================================
+                  prompt_2 = f"""You are an advanced layout editor.
+          TASK: Take the LINEAR MARKDOWN below and convert schedules, lists, or mapped data into standard Markdown tables (`|---|`).
+
+          CRITICAL RULES:
+          1. When converting text to table cells, you may ONLY use `<br>` tags for line breaks. Do not use any other HTML.
+          2. Leave standard paragraphs, footnotes, contact information, and headings outside the table exactly as they are. DO NOT delete any text.
+          3. Output your text inside <tabular_markdown> tags.
+
+          <linear_markdown>
+          {linear_md}
+          </linear_markdown>
+          """
+                  pass2_text = call_llm(prompt_2, "Pass 2 - Table Builder")
+                  match_2 = re.search(r'<tabular_markdown>(.*?)</tabular_markdown>', pass2_text, re.DOTALL | re.IGNORECASE)
+                  tabular_md = match_2.group(1).strip() if match_2 else pass2_text.replace('```markdown', '').replace('```', '').strip()
+
+                  # ==========================================
+                  # PASS 3: Python Reconciliation (Sliding Window vs RAW OCR)
+                  # ==========================================
+                  print("   [Pass 3] Python: Deterministically checking raw OCR for dropped text...", flush=True)
+                  
+                  # Break the RAW input batch into lines
+                  raw_lines = [line.strip() for line in batch.split('\n') if len(line.strip()) > 20]
+                  final_clean = clean_for_comparison(tabular_md)
+                  
+                  missing_orphans = []
+                  window_size = 15 # 15-character alphanumeric sliding window
+                  
+                  for line in raw_lines:
+                      line_clean = clean_for_comparison(line)
+                      if len(line_clean) < window_size: 
+                          continue
+                          
+                      found_in_final = False
+                      
+                      # Slide the 15-char window across the raw line
+                      for i in range(len(line_clean) - window_size + 1):
+                          chunk = line_clean[i:i+window_size]
+                          if chunk in final_clean:
+                              found_in_final = True
+                              break
+                              
+                      # If absolutely zero 15-char sequences from the raw line made it to the final document
+                      if not found_in_final and line not in missing_orphans:
+                          missing_orphans.append(line)
+                          print(f"      [🔍 FOUND MISSING TEXT] Recovered: '{line[:60]}...'")
+
+                  final_text = tabular_md
+                  if missing_orphans:
+                      final_text += "\n\n" + "\n\n".join(missing_orphans)
+
+                  aligned_chunks.append(final_text)
+                  time.sleep(4)
+                  
+              print(f"\n-> Stitching and saving perfectly aligned markdown to: {output_path}", flush=True)
               with open(output_path, 'w', encoding='utf-8') as f:
                   f.write('\n\n'.join(aligned_chunks))
                   
@@ -345,7 +371,7 @@ jobs:
               summary_md = Path(f"conversions/issue-{issue_num}/model_summary.md")
               if corrupted_md.exists() and clean_md.exists():
                   fuzzy_llm_merge(corrupted_md, clean_md, output_md, summary_md)
-                  print("✅ Processing complete.", flush=True)
+                  print("✅ Multi-batch alignment complete.", flush=True)
               else:
                   sys.exit("❌ Missing input files.")
           EOF
